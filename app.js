@@ -16,6 +16,7 @@ createApp({
     const rows = ref([]);
     const busy = ref(false);
     const err = ref('');
+    const note = ref('');
     const loadedAt = ref('');
     const showConn = ref(!settings.isReady(conn));
 
@@ -37,7 +38,7 @@ createApp({
 
     async function refresh() {
       if (!ready.value) { showConn.value = true; return; }
-      busy.value = true; err.value = '';
+      busy.value = true; err.value = ''; note.value = '';
       try {
         rows.value = await gs.pullDeliveryNotes(conn);
         loadedAt.value = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
@@ -51,11 +52,11 @@ createApp({
     }
 
     async function testConn() {
-      busy.value = true; err.value = '';
+      busy.value = true; err.value = ''; note.value = '';
       try {
-        await gs.ping(conn);
-        err.value = '';
-        alert('เชื่อมต่อได้ปกติ');
+        // ต่อถึงแล้วยังไม่พอ — ต้องเป็นสคริปต์ของโปรแกรมแผนงานจริง (ดู core/server.js)
+        const r = await gs.ping(conn);
+        if (r.ok) note.value = r.text; else err.value = r.text;
       } catch (e) {
         err.value = e.message || String(e);
       } finally {
@@ -69,7 +70,7 @@ createApp({
 
     onMounted(() => { if (ready.value) refresh(); });
 
-    return { conn, rows, busy, err, loadedAt, showConn, f, picked, groups, shown, sum,
+    return { conn, rows, busy, err, note, loadedAt, showConn, f, picked, groups, shown, sum,
              units, pickedGroup, ready, saveConn, refresh, testConn, clearFilter,
              fmtDate, nf, qtyOf };
   }

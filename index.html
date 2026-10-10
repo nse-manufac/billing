@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="app-version" content="2026-10-10.2">
+<meta name="app-version" content="2026-10-10.3">
 <title>ทะเบียนใบส่งของ</title>
 <!-- กันคำขอ favicon ที่ไม่มีไฟล์ — 404 ลอย ๆ ใน console ทำให้คนเลิกเชื่อ console
      แล้วพอมี error ของจริงโผล่มาจะไม่มีใครสังเกต -->
@@ -60,6 +60,7 @@
   .tag.ok{background:var(--okbg);color:var(--ok);border-color:transparent}
   .msg{padding:9px 12px;border-radius:8px;font-size:14px}
   .msg.bad{background:var(--badbg);color:var(--bad)}
+  .msg.ok{background:var(--okbg);color:var(--ok)}
   .stat{display:flex;gap:18px;flex-wrap:wrap;margin:0 0 10px}
   .stat div{font-size:13px;color:var(--mut)}
   .stat b{display:block;font-size:19px;color:var(--fg);font-weight:600}
@@ -82,7 +83,8 @@
 
   <div class="wrap">
 
-    <div class="msg bad" style="margin-bottom:14px" v-if="err">{{ err }}</div>
+    <div class="msg bad" style="margin-bottom:14px;white-space:pre-line" v-if="err">{{ err }}</div>
+    <div class="msg ok" style="margin-bottom:14px;white-space:pre-line" v-if="note">{{ note }}</div>
 
     <!-- ตั้งค่าการเชื่อมต่อ -->
     <div class="card" v-if="showConn">

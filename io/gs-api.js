@@ -9,6 +9,7 @@
  *
  * ⚠️ ต้องมี `redirect: 'follow'` — Apps Script ตอบ 302 ชี้ไป googleusercontent เสมอ
  */
+import { describePing, explainError } from '../core/server.js';
 
 /** เรียกคำสั่งหนึ่งครั้ง — โยน Error พร้อมข้อความภาษาไทยเมื่อผิดพลาด */
 export async function call(cfg, action, body) {
@@ -38,12 +39,18 @@ export async function call(cfg, action, body) {
     throw new Error('เซิร์ฟเวอร์ตอบกลับมาไม่ใช่ JSON — URL อาจชี้ไปที่ deployment ที่ไม่ใช่ /exec');
   }
 
-  if (!data.ok) throw new Error(data.error || 'เซิร์ฟเวอร์ตอบกลับผิดพลาด');
+  if (!data.ok) throw new Error(explainError(data.error || 'เซิร์ฟเวอร์ตอบกลับผิดพลาด'));
   return data;
 }
 
-/** ตรวจว่าตั้งค่าถูกและต่อถึงจริงไหม — ใช้ปุ่ม "ทดสอบการเชื่อมต่อ" */
-export const ping = cfg => call(cfg, 'ping', {});
+/** ทดสอบการเชื่อมต่อ — คืน {ok, text}
+ *
+ *  ⚠️ ไม่พอที่จะดูแค่ว่า "ตอบกลับมาไหม" เพราะสคริปต์ของ store ก็รับ ping ได้เหมือนกัน
+ *     ต้องดูรูปร่างคำตอบว่าเป็นของโปรแกรมแผนงานจริง (ดู core/server.js)
+ */
+export async function ping(cfg) {
+  return describePing(await call(cfg, 'ping', {}));
+}
 
 /** ดึงใบส่งของทั้งหมด
  *
