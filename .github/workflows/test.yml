@@ -1,0 +1,56 @@
+name: เทส
+
+# ═══════════════════════════════════════════════════════════════
+# รันเทสของ core/ ทุก PR และทุกครั้งที่ main ขยับ
+#
+# ไม่เรียกโมเดลเลย จึง **ไม่มีค่าใช้จ่าย** กดกี่ครั้งก็ได้
+# repo นี้เป็น public → นาที Actions ไม่จำกัด (ต่างจาก repo private)
+#
+# ⚠️ เทสชุดนี้ครอบ `core/` เท่านั้น — หน้าจอยังไม่มีเทส
+#    PR ที่แตะ index.html ต้องเปิดดูด้วยตาเองทั้งบนจอคอมและบนมือถือ
+# ═══════════════════════════════════════════════════════════════
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# PR ที่ push ตาม ๆ กัน ให้ยกเลิกรอบเก่าทิ้ง — ผลของรอบเก่าไม่มีความหมายแล้ว
+# (ต่างจาก repo ที่รอบหนึ่งเสียเงิน ตรงนี้ไม่เสีย จึงฆ่าทิ้งได้ไม่ต้องเสียดาย)
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: เทส core
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # ไม่มี npm install — แอปนี้ไม่มี dependency ตอนรันและไม่มีตอนเทส
+      # ใช้ตัวรันเทสที่มากับ node (`node --test`) ล้วน ๆ
+      # ถ้าวันหนึ่งมี dependency จริง ต้องเพิ่ม `npm ci` และ package-lock.json ตรงนี้
+      - name: ตรวจว่ายังไม่มี dependency แอบเข้ามา
+        run: |
+          set -euo pipefail
+          if node -e "const p=require('./package.json');process.exit((p.dependencies&&Object.keys(p.dependencies).length)||(p.devDependencies&&Object.keys(p.devDependencies).length)?1:0)"; then
+            echo "ไม่มี dependency — ข้าม npm install ได้ตามเดิม"
+          else
+            echo "::error::package.json มี dependency แล้ว แต่ workflow ยังไม่ได้ลงให้"
+            echo "::error::เพิ่มขั้นตอน npm ci และ commit package-lock.json ด้วย"
+            exit 1
+          fi
+
+      - name: npm test
+        run: npm test
