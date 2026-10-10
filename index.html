@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="app-version" content="2026-10-10.1">
+<title>ทะเบียนใบส่งของ</title>
+
+<!-- Vue global build — แอปนี้ออนไลน์เป็นหลักอยู่แล้ว ไม่มีเน็ตก็ไม่มีข้อมูลให้ดู
+     จึงยอมให้ lib มาจาก CDN ได้ ต่างจาก `plan` ที่ต้องทำงานตอนออฟไลน์ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.21/vue.global.prod.min.js"></script>
+
+<style>
+  :root{
+    --bg:#f4f6f8; --fg:#1b2430; --mut:#64748b; --line:#dbe2ea;
+    --card:#fff; --pri:#1d4ed8; --warn:#b45309; --warnbg:#fef3c7;
+    --bad:#b91c1c; --badbg:#fee2e2; --ok:#15803d; --okbg:#dcfce7;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0f141a; --fg:#e6edf3; --mut:#93a4b8; --line:#2b3642;
+      --card:#161d25; --pri:#60a5fa; --warn:#fbbf24; --warnbg:#3a2d10;
+      --bad:#f87171; --badbg:#3a1a1a; --ok:#4ade80; --okbg:#10291a;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:15px/1.5 -apple-system,"Segoe UI",Roboto,"Noto Sans Thai",sans-serif}
+  header{background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;
+         position:sticky;top:0;z-index:5}
+  .wrap{max-width:1100px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+        padding:14px 16px;margin-bottom:14px}
+  h1{font-size:17px;margin:0}
+  h2{font-size:15px;margin:0 0 10px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .grow{flex:1}
+  .f{display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--mut)}
+  input,select{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:7px;
+               background:var(--bg);color:var(--fg);width:100%}
+  .btn{font:inherit;padding:7px 13px;border:1px solid var(--line);border-radius:7px;
+       background:var(--bg);color:var(--fg);cursor:pointer}
+  .btn.primary{background:var(--pri);border-color:var(--pri);color:#fff}
+  .btn:disabled{opacity:.5;cursor:default}
+  .hint{color:var(--mut);font-size:13px;margin:0}
+  .mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace}
+  .scroll{overflow:auto;border:1px solid var(--line);border-radius:8px}
+  table{border-collapse:collapse;width:100%;font-size:14px}
+  th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+  th{background:var(--bg);position:sticky;top:0;font-weight:600;font-size:13px}
+  tbody tr{cursor:pointer}
+  tbody tr:hover{background:var(--bg)}
+  tbody tr.sel{background:var(--okbg)}
+  .tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:12px;
+       background:var(--bg);border:1px solid var(--line)}
+  .tag.warn{background:var(--warnbg);color:var(--warn);border-color:transparent}
+  .tag.ok{background:var(--okbg);color:var(--ok);border-color:transparent}
+  .msg{padding:9px 12px;border-radius:8px;font-size:14px}
+  .msg.bad{background:var(--badbg);color:var(--bad)}
+  .stat{display:flex;gap:18px;flex-wrap:wrap;margin:0 0 10px}
+  .stat div{font-size:13px;color:var(--mut)}
+  .stat b{display:block;font-size:19px;color:var(--fg);font-weight:600}
+  .right{text-align:right}
+  @media (max-width:640px){ .wrap{padding:12px} th,td{padding:6px} }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="wrap row" style="padding:0;max-width:1100px">
+      <h1>ทะเบียนใบส่งของ</h1>
+      <span class="hint" v-if="loadedAt">ข้อมูลล่าสุดเมื่อ {{ loadedAt }} น.</span>
+      <div class="grow"></div>
+      <button class="btn" @click="showConn = !showConn">ตั้งค่าการเชื่อมต่อ</button>
+      <button class="btn primary" :disabled="busy || !ready" @click="refresh">
+        {{ busy ? 'กำลังโหลด...' : 'โหลดใหม่' }}</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+
+    <div class="msg bad" style="margin-bottom:14px" v-if="err">{{ err }}</div>
+
+    <!-- ตั้งค่าการเชื่อมต่อ -->
+    <div class="card" v-if="showConn">
+      <h2>เชื่อมต่อกับโปรแกรมแผนงาน</h2>
+      <p class="hint" style="margin-bottom:10px">
+        ใช้ URL และรหัสผ่านชุดเดียวกับที่กรอกในโปรแกรมแผนงาน (plan) ·
+        เก็บไว้ในเครื่องนี้เท่านั้น ไม่ได้ส่งไปไหน</p>
+      <div class="row">
+        <label class="f grow" style="min-width:260px">URL ของ Apps Script
+          <input v-model.trim="conn.url" class="mono" placeholder="https://script.google.com/macros/s/.../exec"></label>
+        <label class="f" style="width:180px">รหัสผ่าน (token)
+          <input v-model.trim="conn.token" type="password"></label>
+        <label class="f" style="width:150px">ชื่อเครื่อง
+          <input v-model.trim="conn.device" placeholder="เช่น กรุงเทพ-1"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" :disabled="busy || !conn.url" @click="testConn">ทดสอบการเชื่อมต่อ</button>
+        <button class="btn primary" :disabled="!conn.url || !conn.token" @click="saveConn(); refresh()">
+          บันทึกแล้วโหลด</button>
+      </div>
+    </div>
+
+    <p class="msg bad" v-if="!ready && !showConn">
+      ยังไม่ได้ตั้งค่าการเชื่อมต่อ — กดปุ่ม "ตั้งค่าการเชื่อมต่อ" ด้านบน</p>
+
+    <!-- ตัวกรอง -->
+    <div class="card" v-if="ready">
+      <div class="row">
+        <label class="f grow" style="min-width:180px">ค้นหา
+          <input v-model.trim="f.q" placeholder="เลขใบ · เลข PO · P/N · หมายเหตุ"></label>
+        <label class="f" style="width:130px">หน่วย
+          <select v-model="f.unit">
+            <option value="">ทั้งหมด</option>
+            <option v-for="u in units" :key="u" :value="u">{{ u }}</option>
+          </select></label>
+        <label class="f" style="width:150px">สถานะเลขใบ
+          <select v-model="f.issued">
+            <option value="all">ทั้งหมด</option>
+            <option value="yes">ออกเลขใบแล้ว</option>
+            <option value="no">ยังไม่ออกเลขใบ</option>
+          </select></label>
+        <label class="f" style="width:150px">ตั้งแต่วันที่<input v-model="f.from" type="date"></label>
+        <label class="f" style="width:150px">ถึงวันที่<input v-model="f.to" type="date"></label>
+        <button class="btn" @click="clearFilter">ล้างตัวกรอง</button>
+      </div>
+    </div>
+
+    <!-- รายการใบ -->
+    <div class="card" v-if="ready">
+      <div class="stat">
+        <div>ใบทั้งหมด<b>{{ nf(sum.bills) }}</b></div>
+        <div>ออกเลขใบแล้ว<b>{{ nf(sum.issued) }}</b></div>
+        <div>ยังไม่ออกเลขใบ<b>{{ nf(sum.pending) }}</b></div>
+        <div>รายการย่อย<b>{{ nf(sum.lines) }}</b></div>
+        <div>ยอดรวม<b>{{ nf(sum.qty) }}</b></div>
+      </div>
+
+      <p class="hint" v-if="!groups.length && !busy">ยังไม่มีใบส่งของในระบบ หรือยังโหลดไม่สำเร็จ</p>
+      <p class="hint" v-else-if="!shown.length">ไม่มีใบที่ตรงกับตัวกรอง</p>
+
+      <div class="scroll" style="max-height:52vh" v-if="shown.length">
+        <table>
+          <thead><tr>
+            <th style="width:120px">เลขที่ใบ</th><th style="width:105px">วันที่</th>
+            <th style="width:95px">หน่วย</th><th>P/N</th>
+            <th style="width:80px" class="right">รายการ</th>
+            <th style="width:90px" class="right">กล่อง</th>
+            <th style="width:110px" class="right">ยอดรวม</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="g in shown" :key="g.key" :class="{ sel: g.key === picked }"
+                @click="picked = (picked === g.key ? '' : g.key)">
+              <td class="mono">
+                <span v-if="g.issued">{{ g.billNo }}</span>
+                <span v-else class="tag warn">ยังไม่ออกเลข</span>
+              </td>
+              <td>{{ fmtDate(g.date) }}</td>
+              <td class="mono">{{ g.unit || '—' }}</td>
+              <td class="mono">{{ g.pns.join(' · ') || '—' }}</td>
+              <td class="right">{{ nf(g.lines.length) }}</td>
+              <td class="right">{{ nf(g.boxes) }}</td>
+              <td class="right mono">{{ nf(g.qty) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- รายละเอียดของใบที่เลือก -->
+    <div class="card" v-if="pickedGroup">
+      <div class="row">
+        <h2 style="margin:0">
+          รายละเอียดใบ
+          <span class="mono" v-if="pickedGroup.issued">{{ pickedGroup.billNo }}</span>
+          <span class="tag warn" v-else>ยังไม่ออกเลขใบ</span>
+        </h2>
+        <div class="grow"></div>
+        <span class="tag">{{ fmtDate(pickedGroup.date) }}</span>
+        <span class="tag">{{ pickedGroup.unit || 'ไม่ระบุหน่วย' }}</span>
+      </div>
+      <p class="hint" style="margin:6px 0 10px">
+        ใบนี้มี {{ pickedGroup.lines.length }} รายการ · {{ pickedGroup.orders.length }} ใบสั่ง ·
+        ยอดรวม {{ nf(pickedGroup.qty) }}</p>
+      <div class="scroll">
+        <table>
+          <thead><tr>
+            <th style="width:140px">เลขใบสั่ง (PO)</th><th style="width:130px">P/N</th>
+            <th style="width:100px" class="right">ต่อกล่อง</th>
+            <th style="width:80px" class="right">กล่อง</th>
+            <th style="width:80px" class="right">เศษ</th>
+            <th style="width:110px" class="right">ยอดส่ง</th>
+            <th>หมายเหตุ</th><th style="width:105px">วันที่คีย์</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="l in pickedGroup.lines" :key="l.id" style="cursor:default">
+              <td class="mono">{{ l.orderId || '—' }}</td>
+              <td class="mono">{{ l.pn || '—' }}</td>
+              <td class="right">{{ nf(l.perBox) }}</td>
+              <td class="right">{{ nf(l.boxes) }}</td>
+              <td class="right">{{ nf(l.remainder) }}</td>
+              <td class="right mono">{{ nf(qtyOf(l)) }}</td>
+              <td class="hint">{{ l.remark || '' }}</td>
+              <td>{{ fmtDate(l.date) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint" style="margin:10px 0 0">
+        ขั้นถัดไปที่ยังไม่ได้ทำ — ปุ่มออกไฟล์ Excel พร้อมช่องฝั่งกรุงเทพ
+        (ยังไม่รู้ว่าฟอร์มต้องการช่องอะไรบ้าง)</p>
+    </div>
+
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
