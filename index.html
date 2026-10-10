@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="app-version" content="2026-10-10.4">
+<meta name="app-version" content="2026-10-10.5">
 <title>ทะเบียนใบส่งของ</title>
 <!-- กันคำขอ favicon ที่ไม่มีไฟล์ — 404 ลอย ๆ ใน console ทำให้คนเลิกเชื่อ console
      แล้วพอมี error ของจริงโผล่มาจะไม่มีใครสังเกต -->
@@ -144,7 +144,8 @@
         <div>P/N<b>{{ nf(sum.pns) }}</b></div>
         <div>ใบสั่ง<b>{{ nf(sum.pos) }}</b></div>
         <div>ยอดรวม<b>{{ nf(sum.qty) }}</b></div>
-        <div v-if="sum.needAttention">ต้องดูก่อน<b class="warn">{{ nf(sum.needAttention) }}</b></div>
+        <div v-if="sum.noPacking">ยังไม่คีย์ยอดบรรจุ<b class="warn">{{ nf(sum.noPacking) }}</b></div>
+        <div v-if="sum.needAttention">ตัดไม่ครบ/เลขชน<b class="warn">{{ nf(sum.needAttention) }}</b></div>
       </div>
 
       <p class="hint" v-if="!bills.length && !busy">ยังไม่มีใบส่งของในระบบ หรือยังโหลดไม่สำเร็จ</p>
@@ -154,7 +155,8 @@
         <table>
           <thead><tr>
             <th style="width:120px">เลขที่ใบ</th><th style="width:105px">วันที่</th>
-            <th style="width:95px">หน่วย</th><th>P/N</th>
+            <th style="width:95px">หน่วย</th>
+            <th style="width:70px" class="right">P/N</th>
             <th style="width:70px" class="right">ใบสั่ง</th>
             <th style="width:80px" class="right">กล่อง</th>
             <th style="width:110px" class="right">ยอดบรรจุ</th>
@@ -170,10 +172,13 @@
               </td>
               <td>{{ fmtDate(b.date) }}</td>
               <td class="mono">{{ b.unit || '—' }}</td>
-              <td class="mono">{{ b.pns.join(' · ') || '—' }}</td>
-              <td class="right">{{ nf(b.allocs.length) }}</td>
+              <td class="right">{{ nf(b.pns.length) }}</td>
+              <td class="right">{{ nf(b.poNos.length) }}</td>
               <td class="right">{{ nf(b.boxes) }}</td>
-              <td class="right mono">{{ nf(b.qty) }}</td>
+              <td class="right mono">
+                <span v-if="b.hasPacking">{{ nf(b.qty) }}</span>
+                <span v-else class="tag warn" title="วันนี้มียอดส่ง แต่ยังไม่ได้คีย์ยอดบรรจุ จึงยังออกใบส่งของไม่ได้">ยังไม่คีย์</span>
+              </td>
               <td class="right mono">
                 {{ nf(b.allocQty) }}
                 <span v-if="b.unallocated" class="tag warn"
@@ -201,16 +206,20 @@
       <p class="msg bad" style="margin:8px 0 0" v-if="pickedBill.billConflict">
         ใบนี้มีเลขใบมากกว่าหนึ่ง — {{ pickedBill.billNos.join(' · ') }}
         · น่าจะมีคนคีย์ชนกัน ต้องไปแก้ที่โปรแกรมแผนงานก่อนวางบิล</p>
-      <p class="msg warn" style="margin:8px 0 0" v-if="pickedBill.unallocated">
+      <p class="msg warn" style="margin:8px 0 0" v-if="!pickedBill.hasPacking">
+        วันนี้มียอดส่งเข้าใบสั่งแล้ว แต่<b>ยังไม่ได้คีย์ยอดบรรจุ</b> จึงยังออกใบส่งของไม่ได้
+        — ไปคีย์ที่แท็บ 🚚 ใบส่งสินค้า ในโปรแกรมแผนงานก่อน</p>
+      <p class="msg warn" style="margin:8px 0 0" v-else-if="pickedBill.unallocated">
         ยอดบรรจุยังตัดเข้าใบสั่งไม่ครบ เหลือ {{ nf(pickedBill.unallocated) }}
         — ระบบไม่ตัดให้เอง คนเป็นคนเลือกว่าใบไหนเท่าไหร่ที่โปรแกรมแผนงาน</p>
 
       <!-- ยอดบรรจุ ราย P/N — ตรงกับช่องที่ merge ในฟอร์ม -->
       <h2 style="margin:14px 0 4px">ยอดบรรจุ (ราย P/N)</h2>
-      <p class="hint" style="margin:0 0 8px">
+      <p class="hint" style="margin:0 0 8px" v-if="pickedBill.hasPacking">
         ของบรรจุรวมกันตาม P/N แล้วค่อยตัดเข้าใบสั่งทีหลัง ·
         รวม {{ nf(pickedBill.qty) }} จาก {{ pickedBill.packs.length }} P/N</p>
-      <div class="scroll">
+      <p class="hint" style="margin:0 0 8px" v-else>ยังไม่ได้คีย์ยอดบรรจุของวันนี้</p>
+      <div class="scroll" v-if="pickedBill.hasPacking">
         <table>
           <thead><tr>
             <th style="width:140px">P/N</th>

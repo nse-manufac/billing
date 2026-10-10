@@ -116,9 +116,17 @@ export function buildBills(notes, records, orders) {
     b.qty = b.packs.reduce((s, p) => s + p.qty, 0);
     b.boxes = b.packs.reduce((s, p) => s + p.boxes, 0);
     b.allocQty = b.allocs.reduce((s, a) => s + a.qty, 0);
-    // ยอดบรรจุยังตัดเข้าใบสั่งไม่ครบ — ไม่ใช่บั๊ก แต่กรุงเทพควรรู้ก่อนวางบิล
-    b.unallocated = Math.round((b.qty - b.allocQty) * 1e5) / 1e5;
-    b.pns = [...new Set(b.packs.map(p => p.pn).filter(Boolean))];
+
+    // ⚠️ วันที่มียอดส่งแต่ไม่มียอดบรรจุเลย เจอเยอะในข้อมูลจริง (10 ต.ค. 2026)
+    //    เพราะ `plan` ยังเปิดทางคีย์ยอดส่งที่แท็บคีย์ยอดรายวันไว้เป็นทางสำรอง
+    //    วันพวกนั้น **ยังไม่เคยออกใบส่งของจากโปรแกรม** จึงไม่ใช่ "ตัดไม่ครบ"
+    //    แต่เป็น "ยังไม่ได้เริ่มทำใบ" ซึ่งคนละเรื่องกันและต้องบอกคนละแบบ
+    //    ถ้าเหมารวมกัน จะได้ข้อความว่า "เหลือ -8,186" ซึ่งไม่มีความหมาย
+    b.hasPacking = b.packs.length > 0;
+    b.unallocated = b.hasPacking ? Math.round((b.qty - b.allocQty) * 1e5) / 1e5 : 0;
+
+    // นับ P/N จากทั้งสองฝั่ง — วันที่ยังไม่มียอดบรรจุก็ยังรู้ P/N ได้จากใบสั่ง
+    b.pns = [...new Set([...b.packs.map(p => p.pn), ...b.allocs.map(a => a.pn)].filter(Boolean))];
     b.poNos = [...new Set(b.allocs.map(a => a.poNo).filter(Boolean))];
     out.push(b);
   }
@@ -165,6 +173,7 @@ export function summarize(bills) {
     qty: list.reduce((s, b) => s + b.qty, 0),
     pns: list.reduce((s, b) => s + b.pns.length, 0),
     pos: list.reduce((s, b) => s + b.allocs.length, 0),
+    noPacking: list.filter(b => !b.hasPacking).length,
     needAttention: list.filter(b => b.unallocated !== 0 || b.billConflict).length
   };
 }

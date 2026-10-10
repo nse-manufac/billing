@@ -185,3 +185,32 @@ test('D2 — ข้อมูลเปล่าหรือพังต้อง�
   assert.deepEqual(activeRows(undefined), []);
   assert.equal(buildBills([pack(), null, undefined], [null], [undefined]).length, 1);
 });
+
+test('B8 — วันที่มียอดส่งแต่ยังไม่ได้คีย์ยอดบรรจุ ต้องแยกออกจาก "ตัดไม่ครบ"', () => {
+  // เจอเยอะในข้อมูลจริง (10 ต.ค. 2026) เพราะ plan ยังเปิดทางคีย์ยอดส่ง
+  // ที่แท็บคีย์ยอดรายวันไว้เป็นทางสำรอง วันพวกนั้นยังไม่เคยออกใบส่งของเลย
+  const b = buildBills([], [ship({ qty: 8186 })], [order()]);
+  assert.equal(b.length, 1);
+  assert.equal(b[0].hasPacking, false);
+  assert.equal(b[0].qty, 0);
+  assert.equal(b[0].allocQty, 8186);
+  assert.equal(b[0].unallocated, 0,
+    'ถ้าเหมารวมกับ "ตัดไม่ครบ" จะได้ข้อความว่าเหลือ -8,186 ซึ่งไม่มีความหมาย');
+  const s = summarize(b);
+  assert.equal(s.noPacking, 1);
+  assert.equal(s.needAttention, 0, 'คนละเรื่องกัน ต้องนับแยก');
+});
+
+test('B9 — นับ P/N จากทั้งยอดบรรจุและใบสั่ง ไม่ใช่จากยอดบรรจุอย่างเดียว', () => {
+  // วันที่ยังไม่มียอดบรรจุ ก็ยังรู้ P/N ได้จากใบสั่ง — ไม่งั้นช่อง P/N ขึ้น 0 ทั้งที่มีของส่งจริง
+  const b = buildBills([], [ship({ orderId: 'oA' }), ship({ orderId: 'oB' })],
+    [order({ id: 'oA', pn: 'PN1', poNo: 'ZZ0001' }),
+     order({ id: 'oB', pn: 'PN2', poNo: 'ZZ0002' })]);
+  assert.deepEqual(b[0].pns, ['PN1', 'PN2']);
+  assert.deepEqual(b[0].poNos, ['ZZ0001', 'ZZ0002']);
+});
+
+test('B9 — P/N ที่ซ้ำกันระหว่างสองฝั่ง ต้องนับครั้งเดียว', () => {
+  const b = buildBills([pack({ pn: 'PN1' })], [ship({ qty: 5 })], [order({ pn: 'PN1' })]);
+  assert.deepEqual(b[0].pns, ['PN1']);
+});
