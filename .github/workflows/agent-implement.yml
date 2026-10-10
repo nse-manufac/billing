@@ -178,6 +178,32 @@ jobs:
           echo "go=$go" >> "$GITHUB_OUTPUT"
           echo "► หลังตรวจเพดาน: go=$go"
 
+      # ═══════════════════════════════════════════════════════════════
+      # ด่านล้มเองต้องไม่เงียบ
+      #
+      # ถ้าขั้นตอนด่านหรือขั้นตอนเพดานล้ม (API ล่ม · rate limit) job "แก้และเปิด PR"
+      # จะถูกข้ามไปเฉย ๆ แล้วหน้า issue จะเหลือป้าย ready-to-fix ที่ไม่มีใครมาทำ
+      # ซึ่ง **หน้าตาเหมือนกันเป๊ะกับยังไม่มีใครเริ่ม** ต้องเปิดแท็บ Actions เองถึงจะรู้
+      # ═══════════════════════════════════════════════════════════════
+      - name: แจ้งเมื่อด่านล้มเอง
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          {
+            echo "⚠️ **ขั้นตอนตรวจด่านของช่างซ่อมล้มเอง — ยังไม่มีใครลงมือ**"
+            echo ""
+            echo "ไม่ใช่ว่าเรื่องนี้ไม่ผ่านด่าน แต่ตัวด่านเองทำงานไม่จบ (มักเป็น API ของ GitHub)"
+            echo "ป้าย \`ready-to-fix\` ยังอยู่ ถ้าจะให้ลองใหม่ ให้ถอดป้ายแล้วติดกลับ"
+            echo ""
+            echo "ดูสาเหตุ: $RUN_URL"
+          } > gate-fail.md
+          gh issue comment "$ISSUE" -R "$REPO" --body-file gate-fail.md
+
   # ─────────────────────────────────────────────
   # แก้จริง — job เดียวใน repo ที่มี contents: write
   # ─────────────────────────────────────────────
