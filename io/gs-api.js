@@ -52,13 +52,28 @@ export async function ping(cfg) {
   return describePing(await call(cfg, 'ping', {}));
 }
 
-/** ดึงใบส่งของทั้งหมด
+/** ดึงหนึ่งตาราง
  *
  *  ส่ง `since` ว่างเสมอในรุ่นนี้ = ดึงทุกแถวทุกครั้ง
  *  แอปนี้ไม่เก็บสำเนาไว้ในเครื่อง (ออนไลน์เป็นหลัก ดู INVARIANTS B1)
- *  ที่ปริมาณใบจริงยังเร็วพอ ถ้าโตจนช้าค่อยเพิ่มการดึงเฉพาะที่เปลี่ยน
+ *  ที่ปริมาณจริงยังเร็วพอ ถ้าโตจนช้าค่อยเพิ่มการดึงเฉพาะที่เปลี่ยน
  */
-export async function pullDeliveryNotes(cfg) {
-  const d = await call(cfg, 'pullRows', { table: 'DeliveryNotes', since: '' });
+export async function pullTable(cfg, table) {
+  const d = await call(cfg, 'pullRows', { table, since: '' });
   return Array.isArray(d.rows) ? d.rows : [];
+}
+
+/** ดึงสามตารางที่ต้องใช้ประกอบเป็นใบส่งของ
+ *
+ *  ⚠️ ต้องครบทั้งสาม — ยอดบรรจุอยู่ใน DeliveryNotes แต่ "ใบไหนได้เท่าไหร่"
+ *     อยู่ใน Records(shipping) และหน่วยของใบสั่งอยู่ใน Orders เท่านั้น
+ *     ขาดตัวใดตัวหนึ่งแล้วหน้าจอจะโชว์ช่องว่างที่ดูเหมือนข้อมูลหาย
+ *
+ *  ยิงพร้อมกันไม่ได้ — Apps Script ล็อกทีละคำขอ ยิงซ้อนจะได้ "ระบบกำลังถูกใช้งาน"
+ */
+export async function pullAll(cfg) {
+  const notes   = await pullTable(cfg, 'DeliveryNotes');
+  const records = await pullTable(cfg, 'Records');
+  const orders  = await pullTable(cfg, 'Orders');
+  return { notes, records, orders };
 }

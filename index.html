@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="app-version" content="2026-10-10.3">
+<meta name="app-version" content="2026-10-10.4">
 <title>ทะเบียนใบส่งของ</title>
 <!-- กันคำขอ favicon ที่ไม่มีไฟล์ — 404 ลอย ๆ ใน console ทำให้คนเลิกเชื่อ console
      แล้วพอมี error ของจริงโผล่มาจะไม่มีใครสังเกต -->
@@ -61,6 +61,9 @@
   .msg{padding:9px 12px;border-radius:8px;font-size:14px}
   .msg.bad{background:var(--badbg);color:var(--bad)}
   .msg.ok{background:var(--okbg);color:var(--ok)}
+  .msg.warn{background:var(--warnbg);color:var(--warn)}
+  .stat b.warn{color:var(--warn)}
+  .tag.bad{background:var(--badbg);color:var(--bad);border-color:transparent}
   .stat{display:flex;gap:18px;flex-wrap:wrap;margin:0 0 10px}
   .stat div{font-size:13px;color:var(--mut)}
   .stat b{display:block;font-size:19px;color:var(--fg);font-weight:600}
@@ -138,11 +141,13 @@
         <div>ใบทั้งหมด<b>{{ nf(sum.bills) }}</b></div>
         <div>ออกเลขใบแล้ว<b>{{ nf(sum.issued) }}</b></div>
         <div>ยังไม่ออกเลขใบ<b>{{ nf(sum.pending) }}</b></div>
-        <div>รายการย่อย<b>{{ nf(sum.lines) }}</b></div>
+        <div>P/N<b>{{ nf(sum.pns) }}</b></div>
+        <div>ใบสั่ง<b>{{ nf(sum.pos) }}</b></div>
         <div>ยอดรวม<b>{{ nf(sum.qty) }}</b></div>
+        <div v-if="sum.needAttention">ต้องดูก่อน<b class="warn">{{ nf(sum.needAttention) }}</b></div>
       </div>
 
-      <p class="hint" v-if="!groups.length && !busy">ยังไม่มีใบส่งของในระบบ หรือยังโหลดไม่สำเร็จ</p>
+      <p class="hint" v-if="!bills.length && !busy">ยังไม่มีใบส่งของในระบบ หรือยังโหลดไม่สำเร็จ</p>
       <p class="hint" v-else-if="!shown.length">ไม่มีใบที่ตรงกับตัวกรอง</p>
 
       <div class="scroll" style="max-height:52vh" v-if="shown.length">
@@ -150,23 +155,30 @@
           <thead><tr>
             <th style="width:120px">เลขที่ใบ</th><th style="width:105px">วันที่</th>
             <th style="width:95px">หน่วย</th><th>P/N</th>
-            <th style="width:80px" class="right">รายการ</th>
-            <th style="width:90px" class="right">กล่อง</th>
-            <th style="width:110px" class="right">ยอดรวม</th>
+            <th style="width:70px" class="right">ใบสั่ง</th>
+            <th style="width:80px" class="right">กล่อง</th>
+            <th style="width:110px" class="right">ยอดบรรจุ</th>
+            <th style="width:110px" class="right">ตัดเข้าใบสั่ง</th>
           </tr></thead>
           <tbody>
-            <tr v-for="g in shown" :key="g.key" :class="{ sel: g.key === picked }"
-                @click="picked = (picked === g.key ? '' : g.key)">
+            <tr v-for="b in shown" :key="b.key" :class="{ sel: b.key === picked }"
+                @click="picked = (picked === b.key ? '' : b.key)">
               <td class="mono">
-                <span v-if="g.issued">{{ g.billNo }}</span>
+                <span v-if="b.issued">{{ b.billNo }}</span>
                 <span v-else class="tag warn">ยังไม่ออกเลข</span>
+                <span v-if="b.billConflict" class="tag bad" title="ใบเดียวกันมีเลขใบมากกว่าหนึ่ง">เลขชนกัน</span>
               </td>
-              <td>{{ fmtDate(g.date) }}</td>
-              <td class="mono">{{ g.unit || '—' }}</td>
-              <td class="mono">{{ g.pns.join(' · ') || '—' }}</td>
-              <td class="right">{{ nf(g.lines.length) }}</td>
-              <td class="right">{{ nf(g.boxes) }}</td>
-              <td class="right mono">{{ nf(g.qty) }}</td>
+              <td>{{ fmtDate(b.date) }}</td>
+              <td class="mono">{{ b.unit || '—' }}</td>
+              <td class="mono">{{ b.pns.join(' · ') || '—' }}</td>
+              <td class="right">{{ nf(b.allocs.length) }}</td>
+              <td class="right">{{ nf(b.boxes) }}</td>
+              <td class="right mono">{{ nf(b.qty) }}</td>
+              <td class="right mono">
+                {{ nf(b.allocQty) }}
+                <span v-if="b.unallocated" class="tag warn"
+                      :title="'ยอดบรรจุยังตัดเข้าใบสั่งไม่ครบ เหลือ ' + nf(b.unallocated)">ไม่ครบ</span>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -174,47 +186,80 @@
     </div>
 
     <!-- รายละเอียดของใบที่เลือก -->
-    <div class="card" v-if="pickedGroup">
+    <div class="card" v-if="pickedBill">
       <div class="row">
         <h2 style="margin:0">
           รายละเอียดใบ
-          <span class="mono" v-if="pickedGroup.issued">{{ pickedGroup.billNo }}</span>
+          <span class="mono" v-if="pickedBill.issued">{{ pickedBill.billNo }}</span>
           <span class="tag warn" v-else>ยังไม่ออกเลขใบ</span>
         </h2>
         <div class="grow"></div>
-        <span class="tag">{{ fmtDate(pickedGroup.date) }}</span>
-        <span class="tag">{{ pickedGroup.unit || 'ไม่ระบุหน่วย' }}</span>
+        <span class="tag">{{ fmtDate(pickedBill.date) }}</span>
+        <span class="tag">{{ pickedBill.unit || 'ไม่ระบุหน่วย' }}</span>
       </div>
-      <p class="hint" style="margin:6px 0 10px">
-        ใบนี้มี {{ pickedGroup.lines.length }} รายการ · {{ pickedGroup.orders.length }} ใบสั่ง ·
-        ยอดรวม {{ nf(pickedGroup.qty) }}</p>
+
+      <p class="msg bad" style="margin:8px 0 0" v-if="pickedBill.billConflict">
+        ใบนี้มีเลขใบมากกว่าหนึ่ง — {{ pickedBill.billNos.join(' · ') }}
+        · น่าจะมีคนคีย์ชนกัน ต้องไปแก้ที่โปรแกรมแผนงานก่อนวางบิล</p>
+      <p class="msg warn" style="margin:8px 0 0" v-if="pickedBill.unallocated">
+        ยอดบรรจุยังตัดเข้าใบสั่งไม่ครบ เหลือ {{ nf(pickedBill.unallocated) }}
+        — ระบบไม่ตัดให้เอง คนเป็นคนเลือกว่าใบไหนเท่าไหร่ที่โปรแกรมแผนงาน</p>
+
+      <!-- ยอดบรรจุ ราย P/N — ตรงกับช่องที่ merge ในฟอร์ม -->
+      <h2 style="margin:14px 0 4px">ยอดบรรจุ (ราย P/N)</h2>
+      <p class="hint" style="margin:0 0 8px">
+        ของบรรจุรวมกันตาม P/N แล้วค่อยตัดเข้าใบสั่งทีหลัง ·
+        รวม {{ nf(pickedBill.qty) }} จาก {{ pickedBill.packs.length }} P/N</p>
       <div class="scroll">
         <table>
           <thead><tr>
-            <th style="width:140px">เลขใบสั่ง (PO)</th><th style="width:130px">P/N</th>
+            <th style="width:140px">P/N</th>
             <th style="width:100px" class="right">ต่อกล่อง</th>
             <th style="width:80px" class="right">กล่อง</th>
             <th style="width:80px" class="right">เศษ</th>
-            <th style="width:110px" class="right">ยอดส่ง</th>
-            <th>หมายเหตุ</th><th style="width:105px">วันที่คีย์</th>
+            <th style="width:110px" class="right">ยอดบรรจุ</th>
+            <th>หมายเหตุ</th>
           </tr></thead>
           <tbody>
-            <tr v-for="l in pickedGroup.lines" :key="l.id" style="cursor:default">
-              <td class="mono">{{ l.orderId || '—' }}</td>
-              <td class="mono">{{ l.pn || '—' }}</td>
-              <td class="right">{{ nf(l.perBox) }}</td>
-              <td class="right">{{ nf(l.boxes) }}</td>
-              <td class="right">{{ nf(l.remainder) }}</td>
-              <td class="right mono">{{ nf(qtyOf(l)) }}</td>
-              <td class="hint">{{ l.remark || '' }}</td>
-              <td>{{ fmtDate(l.date) }}</td>
+            <tr v-for="p in pickedBill.packs" :key="p.id" style="cursor:default">
+              <td class="mono">{{ p.pn || '—' }}</td>
+              <td class="right">{{ nf(p.perBox) }}</td>
+              <td class="right">{{ nf(p.boxes) }}</td>
+              <td class="right">{{ nf(p.remainder) }}</td>
+              <td class="right mono">{{ nf(p.qty) }}</td>
+              <td class="hint">{{ p.remark || '' }}</td>
             </tr>
           </tbody>
         </table>
       </div>
-      <p class="hint" style="margin:10px 0 0">
+
+      <!-- ตัดเข้าใบสั่ง ราย PO — แถวพวกนี้คือแถวที่กรุงเทพกรอกในฟอร์ม -->
+      <h2 style="margin:16px 0 4px">ตัดเข้าใบสั่ง (ราย PO)</h2>
+      <p class="hint" style="margin:0 0 8px" v-if="pickedBill.allocs.length">
+        รวม {{ nf(pickedBill.allocQty) }} จาก {{ pickedBill.allocs.length }} ใบสั่ง</p>
+      <p class="hint" style="margin:0 0 8px" v-else>
+        ยังไม่มีการตัดยอดเข้าใบสั่งในวันนี้</p>
+      <div class="scroll" v-if="pickedBill.allocs.length">
+        <table>
+          <thead><tr>
+            <th style="width:150px">เลขใบสั่ง (PO)</th><th style="width:140px">P/N</th>
+            <th style="width:110px" class="right">ยอดสั่งทั้งใบ</th>
+            <th style="width:110px" class="right">ส่งวันนี้</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="a in pickedBill.allocs" :key="a.orderId" style="cursor:default">
+              <td class="mono">{{ a.poNo || '—' }}</td>
+              <td class="mono">{{ a.pn || '—' }}</td>
+              <td class="right">{{ nf(a.orderQty) }}</td>
+              <td class="right mono">{{ nf(a.qty) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="hint" style="margin:12px 0 0">
         ขั้นถัดไปที่ยังไม่ได้ทำ — ปุ่มออกไฟล์ Excel พร้อมช่องฝั่งกรุงเทพ
-        (ยังไม่รู้ว่าฟอร์มต้องการช่องอะไรบ้าง)</p>
+        (Bill No · Date · Bill Return · Bill Cancel · Remark)</p>
     </div>
 
   </div>

@@ -4,7 +4,7 @@
  * กฎอยู่ที่ `core/` · การรับส่งอยู่ที่ `io/` · ไฟล์นี้แค่เอามาต่อกับหน้าจอ
  * ถ้าเผลอเขียนกฎไว้ที่นี่ มันจะกลายเป็นของที่เทสด้วย node ไม่ได้ทันที
  */
-import { groupByBill, filterGroups, summarize, unitsOf, qtyOf } from './core/delivery.js';
+import { buildBills, filterBills, summarize, unitsOf } from './core/delivery.js';
 import * as gs from './io/gs-api.js';
 import * as settings from './io/settings.js';
 
@@ -13,7 +13,7 @@ const { createApp, ref, reactive, computed, onMounted } = Vue;
 createApp({
   setup() {
     const conn = reactive(settings.load());
-    const rows = ref([]);
+    const raw = reactive({ notes: [], records: [], orders: [] });
     const busy = ref(false);
     const err = ref('');
     const note = ref('');
@@ -23,12 +23,11 @@ createApp({
     const f = reactive({ q: '', unit: '', issued: 'all', from: '', to: '' });
     const picked = ref('');
 
-    const groups = computed(() => groupByBill(rows.value));
-    const shown = computed(() => filterGroups(groups.value, f));
+    const bills = computed(() => buildBills(raw.notes, raw.records, raw.orders));
+    const shown = computed(() => filterBills(bills.value, f));
     const sum = computed(() => summarize(shown.value));
-    const units = computed(() => unitsOf(groups.value));
-    const pickedGroup = computed(() => shown.value.find(g => g.key === picked.value) || null);
-
+    const units = computed(() => unitsOf(bills.value));
+    const pickedBill = computed(() => shown.value.find(b => b.key === picked.value) || null);
     const ready = computed(() => settings.isReady(conn));
 
     function saveConn() {
@@ -40,10 +39,11 @@ createApp({
       if (!ready.value) { showConn.value = true; return; }
       busy.value = true; err.value = ''; note.value = '';
       try {
-        rows.value = await gs.pullDeliveryNotes(conn);
+        const d = await gs.pullAll(conn);
+        raw.notes = d.notes; raw.records = d.records; raw.orders = d.orders;
         loadedAt.value = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
         // ใบที่เลือกไว้อาจหายไปจากรอบนี้ (ถูกยกเลิกที่แม่สอด) — อย่าค้างรายละเอียดของใบที่ไม่มีแล้ว
-        if (picked.value && !groups.value.some(g => g.key === picked.value)) picked.value = '';
+        if (picked.value && !bills.value.some(b => b.key === picked.value)) picked.value = '';
       } catch (e) {
         err.value = e.message || String(e);
       } finally {
@@ -70,8 +70,8 @@ createApp({
 
     onMounted(() => { if (ready.value) refresh(); });
 
-    return { conn, rows, busy, err, note, loadedAt, showConn, f, picked, groups, shown, sum,
-             units, pickedGroup, ready, saveConn, refresh, testConn, clearFilter,
-             fmtDate, nf, qtyOf };
+    return { conn, raw, busy, err, note, loadedAt, showConn, f, picked,
+             bills, shown, sum, units, pickedBill, ready,
+             saveConn, refresh, testConn, clearFilter, fmtDate, nf };
   }
 }).mount('#app');

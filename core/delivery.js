@@ -1,33 +1,41 @@
 /**
  * กฎล้วนของใบส่งของ — ไม่แตะ DOM · ไม่แตะเครือข่าย · ไม่แตะที่เก็บข้อมูล
+ * เทสด้วย node ล้วนได้ และย้ายไปแพลตฟอร์มอื่นได้โดยไม่ต้องเขียนใหม่ (INVARIANTS C1)
  *
- * ไฟล์นี้เทสด้วย node ล้วนได้ และย้ายไปแพลตฟอร์มอื่นได้โดยไม่ต้องเขียนใหม่
- * ตรรกะธุรกิจทุกบรรทัดต้องอยู่ที่นี่ ไม่ใช่ใน app.js (ดู INVARIANTS C1)
+ * ══ โครงข้อมูลของจริง อ่านก่อนแก้ ══════════════════════════════
  *
- * ── ข้อมูลมาจากไหน ──────────────────────────────────────────────
- * ตาราง DeliveryNotes ของ repo `plan` ผ่าน Apps Script เดียวกัน
- * หนึ่งแถว = ของหนึ่ง P/N ในใบสั่งหนึ่งใบ ที่ส่งไปในวันหนึ่ง
- * หลายแถวรวมเป็นใบส่งของหนึ่งใบผ่านช่อง billNo
+ * `plan` แยกเก็บใบส่งของเป็น **สองที่** เพราะงานจริงเป็นสองขั้น
  *
- *   id · date · unit · orderId · pn · perBox · boxes · remainder
- *   remark · billNo · deviceName · createdAt · updatedAt · voided
+ *   ยอดบรรจุ        ตาราง DeliveryNotes · หนึ่งแถวต่อ (วันที่ + หน่วย + P/N)
+ *                   **`orderId` ว่างเสมอ** เพราะไม่ได้เป็นของใบสั่งใบใดใบหนึ่ง
+ *                   `billNo` อยู่ที่นี่
+ *   ตัดเข้าใบสั่ง    ตาราง Records ที่ `process === 'shipping'`
+ *                   หนึ่งแถวต่อ (ใบสั่ง + วันที่) · ต้องพึ่ง Orders เพื่อแปลง id → เลข PO
+ *
+ * เพราะของจริง**บรรจุรวมกันตาม P/N ก่อน แล้วค่อยตัดเข้า PO ทีหลัง**
+ * ตรงกับไฟล์ FM-ST-07 ที่ช่องต่อกล่อง/กล่อง/เศษ ถูก merge คร่อมแถวของ P/N เดียวกัน
+ * ส่วนช่องฝั่งกรุงเทพไม่ merge เพราะเป็นรายใบสั่ง
+ *
+ * ⚠️ **หนึ่งใบ = หนึ่งวัน + หนึ่งหน่วย** (เจ้าของยืนยัน 10 ต.ค. 2026)
+ *    ห้ามกลับไปจัดกลุ่มตาม `billNo` หรือตาม P/N — เคยทำแล้วได้ "ใบ" ละ P/N
+ *    ซึ่งไม่ตรงกับใบจริงที่ออกวันละใบต่อหน่วย
  */
 
 /** ยอดที่ส่ง = ต่อกล่อง × กล่อง + เศษ
  *
- *  ⚠️ สูตรนี้ต้องตรงกับ `deliveryQty()` ใน plan เป๊ะ ๆ ห้ามคิดเอง
+ *  ⚠️ ต้องตรงกับ `deliveryQty()` ใน plan เป๊ะ ๆ ห้ามคิดเอง
  *     ในฟอร์ม "กล่อง" คือกล่องที่เต็ม และ "เศษ" คือชิ้นที่เหลือ ไม่ใช่กล่องที่เหลือ
- *     ถ้าคิดต่างกัน ทะเบียนจะโชว์ยอดไม่ตรงกับใบที่ออกไปจริง โดยไม่มีอะไรฟ้อง
+ *     คิดต่างกันเมื่อไหร่ ทะเบียนจะโชว์ยอดไม่ตรงกับใบที่ออกไปจริง โดยไม่มีอะไรฟ้อง
  */
 export function qtyOf(row) {
   const n = v => Number(v) || 0;
   return n(row.perBox) * n(row.boxes) + n(row.remainder);
 }
 
-/** voided ที่มาจาก Google Sheets เป็นได้ทั้ง boolean, 'TRUE', 'true', 1 หรือว่าง
+/** voided จาก Google Sheets เป็นได้ทั้ง boolean, 'TRUE', 'true', 1 หรือว่าง
  *
- *  ⚠️ เช็ก `row.voided === true` ตรง ๆ ไม่พอ — ชีตคืนสตริงมาได้
- *     แถวที่ยกเลิกแล้วจะหลุดเข้ามาเป็นแถวปกติ แล้วยอดรวมจะเกินจริงแบบเงียบ ๆ
+ *  ⚠️ เช็ก `=== true` ตรง ๆ ไม่พอ — ชีตคืนสตริงมาได้
+ *     แถวที่ยกเลิกแล้วจะหลุดเข้ามาเป็นแถวปกติ แล้วยอดรวมเกินจริงแบบเงียบ ๆ
  */
 export function isVoided(row) {
   const v = row && row.voided;
@@ -37,109 +45,130 @@ export function isVoided(row) {
   return s === 'true' || s === '1' || s === 'yes';
 }
 
-/** แถวที่ยังใช้ได้ — ตัดที่ยกเลิกออก แล้วเรียงใหม่ก่อนเก่า */
-export function activeRows(rows) {
-  return (rows || [])
-    .filter(r => r && !isVoided(r))
-    .slice()
-    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-}
+const txt = v => String(v == null ? '' : v).trim();
+const norm = v => txt(v).toUpperCase();
 
-/** เลขใบที่ใช้จัดกลุ่ม — ใบที่ยังไม่ได้ออกเลขรวมกันเป็นกลุ่มเดียวไม่ได้
- *
- *  แถวที่ billNo ว่าง แปลว่า "คีย์ยอดไว้แล้วแต่ยังไม่ได้ออกใบ" ซึ่งเป็นคนละเรื่อง
- *  กับ "ออกใบแล้ว" — ถ้าเอามารวมเป็นกลุ่มเดียวกันหมด กรุงเทพจะเห็นเป็นใบใหญ่ใบเดียว
- *  ที่ไม่มีอยู่จริง จึงแยกเป็นกลุ่มของใครของมันด้วย id ของแถว
- */
-export function billKeyOf(row) {
-  const b = String(row.billNo == null ? '' : row.billNo).trim();
-  return b ? 'B:' + b : 'R:' + row.id;
-}
+/** แถวที่ยังใช้ได้ของตารางใด ๆ */
+export const activeRows = rows => (rows || []).filter(r => r && !isVoided(r));
 
-/** จัดกลุ่มแถวเป็น "ใบ" — หนึ่งใบมีได้หลาย P/N หลายใบสั่ง
+/** กุญแจของใบ = วันที่ + หน่วย */
+export const dayKeyOf = (date, unit) => 'D:' + txt(date) + '|' + norm(unit);
+
+/**
+ * ประกอบใบส่งของจากสามตาราง
  *
- *  คืนค่าเรียงตามวันที่ใหม่ก่อน · ภายในใบเรียงตาม P/N แล้ว PO
+ *   notes   — DeliveryNotes (ยอดบรรจุราย P/N · billNo อยู่ที่นี่)
+ *   records — Records ทั้งหมด (กรอง process='shipping' ให้เอง)
+ *   orders  — Orders (ใช้แปลง orderId → เลข PO และหาหน่วยของใบสั่ง)
+ *
+ * คืนรายการใบ เรียงวันใหม่ก่อนเก่า
  */
-export function groupByBill(rows) {
-  const map = new Map();
-  for (const r of activeRows(rows)) {
-    const key = billKeyOf(r);
-    if (!map.has(key)) {
-      map.set(key, {
-        key,
-        billNo: String(r.billNo == null ? '' : r.billNo).trim(),
-        issued: !!String(r.billNo == null ? '' : r.billNo).trim(),
-        date: r.date || '',
-        unit: r.unit || '',
-        lines: []
-      });
+export function buildBills(notes, records, orders) {
+  const orderById = new Map();
+  for (const o of activeRows(orders)) orderById.set(txt(o.id), o);
+
+  const bills = new Map();
+  const ensure = (date, unit) => {
+    const key = dayKeyOf(date, unit);
+    if (!bills.has(key)) {
+      bills.set(key, { key, date: txt(date), unit: txt(unit),
+                       billNo: '', billNos: [], packs: [], allocs: [] });
     }
-    const g = map.get(key);
-    g.lines.push(r);
-    // ใบเดียวกันคีย์คนละวันได้ — ยึดวันที่เก่าที่สุดเป็นวันของใบ เพราะเป็นวันที่ของจริงออกจากโรงงาน
-    if (r.date && (!g.date || String(r.date) < String(g.date))) g.date = r.date;
-    if (!g.unit && r.unit) g.unit = r.unit;
+    return bills.get(key);
+  };
+
+  // ── ยอดบรรจุ ราย P/N ──
+  for (const n of activeRows(notes)) {
+    const b = ensure(n.date, n.unit);
+    b.packs.push({
+      id: n.id, pn: txt(n.pn), remark: txt(n.remark),
+      perBox: Number(n.perBox) || 0, boxes: Number(n.boxes) || 0,
+      remainder: Number(n.remainder) || 0, qty: qtyOf(n)
+    });
+    const bn = txt(n.billNo);
+    if (bn && b.billNos.indexOf(bn) === -1) b.billNos.push(bn);
   }
 
-  const out = [...map.values()];
-  for (const g of out) {
-    g.lines.sort((a, b) =>
-      String(a.pn || '').localeCompare(String(b.pn || '')) ||
-      String(a.orderId || '').localeCompare(String(b.orderId || '')));
-    g.qty = g.lines.reduce((s, l) => s + qtyOf(l), 0);
-    g.boxes = g.lines.reduce((s, l) => s + (Number(l.boxes) || 0), 0);
-    g.pns = [...new Set(g.lines.map(l => l.pn).filter(Boolean))];
-    g.orders = [...new Set(g.lines.map(l => l.orderId).filter(Boolean))];
-    g.updatedAt = g.lines.reduce(
-      (m, l) => (String(l.updatedAt || '') > m ? String(l.updatedAt || '') : m), '');
+  // ── ยอดที่ตัดเข้าแต่ละใบสั่ง ──
+  // หน่วยของ record มาจากใบสั่ง (Orders.subName) ไม่ได้อยู่ในตัว record เอง
+  for (const r of activeRows(records)) {
+    if (txt(r.process) !== 'shipping') continue;
+    const o = orderById.get(txt(r.orderId));
+    // ไม่รู้จักใบสั่ง = ลงใบไหนไม่ได้ ปล่อยทิ้งดีกว่าเดาหน่วยให้ผิด
+    if (!o) continue;
+    const b = ensure(r.date, o.subName);
+    b.allocs.push({
+      orderId: txt(r.orderId), poNo: txt(o.poNo), pn: txt(o.pn),
+      orderQty: Number(o.orderQty) || 0, qty: Number(r.qty) || 0
+    });
   }
-  return out.sort((a, b) =>
-    String(b.date || '').localeCompare(String(a.date || '')) ||
-    String(b.billNo || '').localeCompare(String(a.billNo || '')));
+
+  const out = [];
+  for (const b of bills.values()) {
+    // ใบเดียวกันไม่ควรมีเลขใบมากกว่าหนึ่ง — ถ้ามี แปลว่ามีคนคีย์ชนกัน ต้องเห็น ไม่ใช่เลือกให้เงียบ ๆ
+    b.billNo = b.billNos[0] || '';
+    b.billConflict = b.billNos.length > 1;
+    b.issued = !!b.billNo;
+
+    b.packs.sort((a, c) => a.pn.localeCompare(c.pn));
+    b.allocs.sort((a, c) => a.pn.localeCompare(c.pn) || a.poNo.localeCompare(c.poNo));
+
+    b.qty = b.packs.reduce((s, p) => s + p.qty, 0);
+    b.boxes = b.packs.reduce((s, p) => s + p.boxes, 0);
+    b.allocQty = b.allocs.reduce((s, a) => s + a.qty, 0);
+    // ยอดบรรจุยังตัดเข้าใบสั่งไม่ครบ — ไม่ใช่บั๊ก แต่กรุงเทพควรรู้ก่อนวางบิล
+    b.unallocated = Math.round((b.qty - b.allocQty) * 1e5) / 1e5;
+    b.pns = [...new Set(b.packs.map(p => p.pn).filter(Boolean))];
+    b.poNos = [...new Set(b.allocs.map(a => a.poNo).filter(Boolean))];
+    out.push(b);
+  }
+
+  return out.sort((a, c) => c.date.localeCompare(a.date) || a.unit.localeCompare(c.unit));
 }
 
-/** ค้นหาแบบพิมพ์บางส่วน — เลขใบ · เลขใบสั่ง · P/N · หมายเหตุ */
-export function matchesQuery(group, q) {
-  const s = String(q == null ? '' : q).trim().toLowerCase();
+/** ค้นหาแบบพิมพ์บางส่วน — เลขใบ · เลข PO · P/N · หมายเหตุ */
+export function matchesQuery(bill, q) {
+  const s = txt(q).toLowerCase();
   if (!s) return true;
-  if (String(group.billNo).toLowerCase().includes(s)) return true;
-  return group.lines.some(l =>
-    String(l.orderId || '').toLowerCase().includes(s) ||
-    String(l.pn || '').toLowerCase().includes(s) ||
-    String(l.remark || '').toLowerCase().includes(s));
+  if (bill.billNo.toLowerCase().includes(s)) return true;
+  if (bill.date.includes(s)) return true;
+  return bill.packs.some(p => p.pn.toLowerCase().includes(s) ||
+                              p.remark.toLowerCase().includes(s))
+      || bill.allocs.some(a => a.poNo.toLowerCase().includes(s) ||
+                               a.pn.toLowerCase().includes(s));
 }
 
 /**
- * กรองรายการใบตามเงื่อนไขบนหน้าจอ
- *
- * `issued` — 'all' ทั้งหมด · 'yes' เฉพาะที่ออกเลขใบแล้ว · 'no' เฉพาะที่ยังไม่ออก
- * ช่วงวันที่เทียบแบบสตริง YYYY-MM-DD ได้ตรง ๆ เพราะรูปแบบนี้เรียงตามตัวอักษรแล้วตรงกับเรียงตามเวลา
+ * กรองตามเงื่อนไขบนหน้าจอ
+ * `issued` — 'all' · 'yes' ออกเลขแล้ว · 'no' ยังไม่ออก
+ * ช่วงวันที่เทียบเป็นสตริงได้ตรง ๆ เพราะ YYYY-MM-DD เรียงตามตัวอักษรตรงกับเรียงตามเวลา
  */
-export function filterGroups(groups, f) {
+export function filterBills(bills, f) {
   const o = f || {};
-  return (groups || []).filter(g => {
-    if (o.unit && g.unit !== o.unit) return false;
-    if (o.issued === 'yes' && !g.issued) return false;
-    if (o.issued === 'no' && g.issued) return false;
-    if (o.from && String(g.date || '') < o.from) return false;
-    if (o.to && String(g.date || '') > o.to) return false;
-    return matchesQuery(g, o.q);
+  return (bills || []).filter(b => {
+    if (o.unit && b.unit !== o.unit) return false;
+    if (o.issued === 'yes' && !b.issued) return false;
+    if (o.issued === 'no' && b.issued) return false;
+    if (o.from && b.date < o.from) return false;
+    if (o.to && b.date > o.to) return false;
+    return matchesQuery(b, o.q);
   });
 }
 
-/** ยอดสรุปของรายการที่เห็นอยู่บนจอ */
-export function summarize(groups) {
-  const list = groups || [];
+/** ยอดสรุปของรายการที่เห็นอยู่บนจอ (INVARIANTS C3) */
+export function summarize(bills) {
+  const list = bills || [];
   return {
     bills: list.length,
-    issued: list.filter(g => g.issued).length,
-    pending: list.filter(g => !g.issued).length,
-    qty: list.reduce((s, g) => s + g.qty, 0),
-    lines: list.reduce((s, g) => s + g.lines.length, 0)
+    issued: list.filter(b => b.issued).length,
+    pending: list.filter(b => !b.issued).length,
+    qty: list.reduce((s, b) => s + b.qty, 0),
+    pns: list.reduce((s, b) => s + b.pns.length, 0),
+    pos: list.reduce((s, b) => s + b.allocs.length, 0),
+    needAttention: list.filter(b => b.unallocated !== 0 || b.billConflict).length
   };
 }
 
-/** รายชื่อหน่วยที่มีจริงในข้อมูล — เอาไปทำตัวเลือกในตัวกรอง ไม่ฮาร์ดโค้ด */
-export function unitsOf(groups) {
-  return [...new Set((groups || []).map(g => g.unit).filter(Boolean))].sort();
-}
+/** รายชื่อหน่วยที่มีจริงในข้อมูล — ไม่ฮาร์ดโค้ด (INVARIANTS C4) */
+export const unitsOf = bills =>
+  [...new Set((bills || []).map(b => b.unit).filter(Boolean))].sort();
