@@ -26,6 +26,29 @@ permissions:
   contents: read
 
 jobs:
+  # แก้ไฟล์ที่เบราว์เซอร์โหลดแล้วลืมบัมป์เลขรุ่น = เครื่องของพนักงานไม่ได้ของใหม่
+  # และเลขบนหน้าจอกลายเป็นคำโกหก ซึ่งอันตรายกว่าไม่มีเลขเลยเพราะทุกคนจะเชื่อมัน
+  # กฎแบบนี้ถ้าไม่บังคับด้วยเครื่อง เดี๋ยวก็ลืม — ให้ CI เป็นคนจำแทน
+  version-bump:
+    name: ตรวจว่าบัมป์ app-version แล้ว
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: เทียบเลขรุ่นกับ base branch
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "${{ github.base_ref }}"
+          node .github/scripts/version-bump.mjs
+
   test:
     name: เทส core
     runs-on: ubuntu-latest

@@ -1,0 +1,54 @@
+name: ด่านกัน agent ยกระดับสิทธิ์ตัวเอง
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+# ═══════════════════════════════════════════════════════════════
+# ภัยที่กันอยู่: PR ที่แก้ไฟล์ใน .github/ เปลี่ยนสิทธิ์ของ workflow,
+# ปิดการตรวจ, หรือทำให้ secret หลุดในรอบถัดไปได้
+#
+# หมายเหตุสำคัญ: workflow ที่รันตอน pull_request คือเวอร์ชันใน PR นั้นเอง
+# แปลว่า PR ที่ "ลบไฟล์นี้ทิ้ง" จะทำให้ job นี้ไม่รัน
+# ตัวที่กันจริงจึงเป็น branch protection ที่ตั้ง job นี้เป็น required check —
+# ถ้า check ไม่รายงานผล ปุ่ม merge จะไม่เขียวตลอดกาล
+#
+# ⚠️ ตอนที่เพิ่มไฟล์นี้เข้ามา repo นี้ **ยังไม่มี branch protection เลย**
+#    ด่านทั้งหมดจึงยังเป็นแค่ไฟแดงให้ดู ไม่ใช่สิ่งที่หยุดการ merge ได้
+#    ต้องไปตั้ง required check ที่หน้า settings ด้วย (เขียนวิธีไว้ใน CLAUDE.md)
+# ═══════════════════════════════════════════════════════════════
+
+concurrency:
+  group: agent-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: ตรวจสิ่งที่ agent ห้ามแตะ
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # ตรรกะการตัดสินทั้งหมดอยู่ใน .github/scripts/ ซึ่งมีเทสคุมที่ tests/guard.test.mjs
+      # และ `npm test` รันให้ทุก PR อยู่แล้ว — ที่นี่เหลือแค่เตรียม base ให้ git เทียบได้
+      - name: ตรวจไฟล์ที่เปลี่ยน
+        env:
+          BASE: origin/${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "${{ github.base_ref }}"
+          node .github/scripts/guard.mjs
