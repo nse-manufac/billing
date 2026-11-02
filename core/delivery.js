@@ -11,6 +11,8 @@
  *                   `billNo` อยู่ที่นี่
  *   ตัดเข้าใบสั่ง    ตาราง Records ที่ `process === 'shipping'`
  *                   หนึ่งแถวต่อ (ใบสั่ง + วันที่) · ต้องพึ่ง Orders เพื่อแปลง id → เลข PO
+ *   การกดออกใบ      ตาราง DeliveryLog · หนึ่งแถวต่อการกดหนึ่งครั้ง
+ *                   ออกซ้ำหน่วย+วันเดิม = เลขเดิม แต่เป็นคนละแถว (ห้ามนับเป็นคนละใบ)
  *
  * เพราะของจริง**บรรจุรวมกันตาม P/N ก่อน แล้วค่อยตัดเข้า PO ทีหลัง**
  * ตรงกับไฟล์ FM-ST-07 ที่ช่องต่อกล่อง/กล่อง/เศษ ถูก merge คร่อมแถวของ P/N เดียวกัน
@@ -60,10 +62,11 @@ export const dayKeyOf = (date, unit) => 'D:' + txt(date) + '|' + norm(unit);
  *   notes   — DeliveryNotes (ยอดบรรจุราย P/N · billNo อยู่ที่นี่)
  *   records — Records ทั้งหมด (กรอง process='shipping' ให้เอง)
  *   orders  — Orders (ใช้แปลง orderId → เลข PO และหาหน่วยของใบสั่ง)
+ *   logs    — DeliveryLog (บอกว่าใบนั้นกดออกไปจริงหรือยัง · ดู INVARIANTS B8 B9)
  *
  * คืนรายการใบ เรียงวันใหม่ก่อนเก่า
  */
-export function buildBills(notes, records, orders) {
+export function buildBills(notes, records, orders, logs) {
   const orderById = new Map();
   for (const o of activeRows(orders)) orderById.set(txt(o.id), o);
 
@@ -72,7 +75,7 @@ export function buildBills(notes, records, orders) {
     const key = dayKeyOf(date, unit);
     if (!bills.has(key)) {
       bills.set(key, { key, date: txt(date), unit: txt(unit),
-                       billNo: '', billNos: [], packs: [], allocs: [] });
+                       billNo: '', billNos: [], packs: [], allocs: [], logs: [] });
     }
     return bills.get(key);
   };
@@ -103,6 +106,17 @@ export function buildBills(notes, records, orders) {
     });
   }
 
+  // ── การกดออกใบ ──
+  // ใบที่ออกไปแล้วต้องขึ้นเสมอ แม้ยอดของวันนั้นจะถูกยกเลิกทีหลัง เพราะกระดาษออกไปแล้วจริง
+  for (const l of activeRows(logs)) {
+    ensure(l.date, l.unit).logs.push({
+      id: l.id, no: txt(l.no), createdAt: txt(l.createdAt), deviceName: txt(l.deviceName),
+      lines: Number(l.lines) || 0,
+      // ว่าง ≠ ศูนย์ — แถวที่ไม่มียอดให้เทียบ ต้องไม่ขึ้นว่ายอดเปลี่ยน (เหมือน dnLogStale ของ plan)
+      qty: txt(l.qty) === '' ? null : Number(l.qty) || 0
+    });
+  }
+
   const out = [];
   for (const b of bills.values()) {
     // ใบเดียวกันไม่ควรมีเลขใบมากกว่าหนึ่ง — ถ้ามี แปลว่ามีคนคีย์ชนกัน ต้องเห็น ไม่ใช่เลือกให้เงียบ ๆ
@@ -116,6 +130,16 @@ export function buildBills(notes, records, orders) {
     b.qty = b.packs.reduce((s, p) => s + p.qty, 0);
     b.boxes = b.packs.reduce((s, p) => s + p.boxes, 0);
     b.allocQty = b.allocs.reduce((s, a) => s + a.qty, 0);
+
+    b.logs.sort((a, c) => c.createdAt.localeCompare(a.createdAt));
+    b.dispatched = b.logs.length > 0;
+    b.noteNo = b.dispatched ? b.logs[0].no : '';
+
+    // ⚠️ ต้องเทียบกับยอดที่ตัดเข้าใบสั่ง ไม่ใช่ยอดบรรจุ — log.qty ของ plan คือผลบวกยอดตัดราย PO
+    //    (dnLogStale) · เทียบคนละตัวแล้วป้ายจะขึ้นทุกใบที่ยอดบรรจุยังตัดไม่ครบ
+    const last = b.logs[0];
+    b.stale = !!last && last.qty != null &&
+      Math.round((last.qty - b.allocQty) * 1e5) !== 0;
 
     // ⚠️ วันที่มียอดส่งแต่ไม่มียอดบรรจุเลย เจอเยอะในข้อมูลจริง (10 ต.ค. 2026)
     //    เพราะ `plan` ยังเปิดทางคีย์ยอดส่งที่แท็บคีย์ยอดรายวันไว้เป็นทางสำรอง
@@ -134,11 +158,12 @@ export function buildBills(notes, records, orders) {
   return out.sort((a, c) => c.date.localeCompare(a.date) || a.unit.localeCompare(c.unit));
 }
 
-/** ค้นหาแบบพิมพ์บางส่วน — เลขใบ · เลข PO · P/N · หมายเหตุ */
+/** ค้นหาแบบพิมพ์บางส่วน — เลขที่ใบส่งของ · Bill No · เลข PO · P/N · หมายเหตุ */
 export function matchesQuery(bill, q) {
   const s = txt(q).toLowerCase();
   if (!s) return true;
   if (bill.billNo.toLowerCase().includes(s)) return true;
+  if (bill.noteNo.toLowerCase().includes(s)) return true;
   if (bill.date.includes(s)) return true;
   return bill.packs.some(p => p.pn.toLowerCase().includes(s) ||
                               p.remark.toLowerCase().includes(s))
@@ -148,7 +173,8 @@ export function matchesQuery(bill, q) {
 
 /**
  * กรองตามเงื่อนไขบนหน้าจอ
- * `issued` — 'all' · 'yes' ออกเลขแล้ว · 'no' ยังไม่ออก
+ * `issued` — 'all' · 'yes' มี Bill No แล้ว · 'no' ยังไม่มี
+ * `sent`   — 'all' · 'yes' กดออกใบแล้ว · 'no' ยังไม่กด
  * ช่วงวันที่เทียบเป็นสตริงได้ตรง ๆ เพราะ YYYY-MM-DD เรียงตามตัวอักษรตรงกับเรียงตามเวลา
  */
 export function filterBills(bills, f) {
@@ -157,6 +183,8 @@ export function filterBills(bills, f) {
     if (o.unit && b.unit !== o.unit) return false;
     if (o.issued === 'yes' && !b.issued) return false;
     if (o.issued === 'no' && b.issued) return false;
+    if (o.sent === 'yes' && !b.dispatched) return false;
+    if (o.sent === 'no' && b.dispatched) return false;
     if (o.from && b.date < o.from) return false;
     if (o.to && b.date > o.to) return false;
     return matchesQuery(b, o.q);
@@ -170,6 +198,9 @@ export function summarize(bills) {
     bills: list.length,
     issued: list.filter(b => b.issued).length,
     pending: list.filter(b => !b.issued).length,
+    dispatched: list.filter(b => b.dispatched).length,
+    notDispatched: list.filter(b => !b.dispatched).length,
+    stale: list.filter(b => b.stale).length,
     qty: list.reduce((s, b) => s + b.qty, 0),
     pns: list.reduce((s, b) => s + b.pns.length, 0),
     pos: list.reduce((s, b) => s + b.allocs.length, 0),
