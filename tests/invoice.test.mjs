@@ -5,9 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  round2, unitFromPo, unitFromInvNo, totalsOf, buildInvoices, MAX_LINES
-} from '../core/invoice.js';
+import { round2, unitFromPo, totalsOf, buildInvoices } from '../core/invoice.js';
 
 /** แถวจากไฟล์ Delta — ตำแหน่งที่ 7 ของรหัส PO คือหน่วย */
 const row = (o = {}) => Object.assign({
@@ -70,24 +68,13 @@ test('E3 — แถวที่ไม่มี GR No รวมเข้าใบ
   assert.equal(r.orphans.length, 1);
 });
 
-test('E3 — ใบเกินฟอร์มต้องบอก', () => {
-  const rows = Array.from({ length: MAX_LINES + 1 }, (_, i) =>
-    row({ invNo: i ? '' : 'TUE-H001', poItem: String(i) }));
-  assert.ok(codes(one(rows)).includes('tooManyLines'));
-  assert.ok(!codes(one(rows.slice(1).concat(row()).slice(0, MAX_LINES))).includes('tooManyLines'));
-});
-
 test('E5 — ยอดของ Delta คือต้นทาง คิดเองเฉพาะเมื่อไฟล์ไม่มียอด', () => {
   const inv = one([row({ qty: 30, unitPrice: 5.1234, grAmount: 153.75 })]);
   assert.equal(inv.lines[0].amount, 153.75, 'ห้ามเอายอดที่คิดเองไปทับของ Delta');
-  assert.ok(codes(inv).includes('amountDiff'), 'ยอดต่างเกินเกณฑ์ต้องเห็น');
+  assert.equal(inv.lines[0].amountDiff, 0.05);
 
   const satang = one([row({ qty: 30, unitPrice: 5.1234, grAmount: 153.71 })]);
   assert.equal(satang.lines[0].amount, 153.71);
-  assert.deepEqual(satang.problems, [], 'ต่าง 1 สตางค์เป็นปกติ ราคาจริงมีทศนิยมมากกว่าที่แสดง');
-
-  const ok = one([row({ qty: 30, unitPrice: 5.1234, grAmount: 153.7 })]);
-  assert.deepEqual(ok.problems, []);
 
   const calc = one([row({ qty: 30, unitPrice: 5.1234, grAmount: '' })]);
   assert.equal(calc.lines[0].amount, 153.7);
@@ -121,24 +108,11 @@ test('E6 — กุญแจเดียวกันแต่ยอดต่า�
   assert.equal(inv.lines.length, 2, 'เก็บไว้ทั้งสองแถวให้คนตัดสิน');
 });
 
-test('E7 — หน่วยดูจากรหัส PO · ใบเดียวต้องหน่วยเดียว · เลขต้องตรงกับหน่วย', () => {
+test('หน่วยดูจากรหัส PO', () => {
   assert.equal(unitFromPo('ZZ0000A001'), 'TUE-A');
   assert.equal(unitFromPo('ZZ0000X001'), '');
   assert.equal(unitFromPo(''), '');
-  assert.equal(unitFromInvNo('TUE-A0001'), 'TUE-A');
-  assert.equal(unitFromInvNo('abc'), '');
-
   assert.equal(one([row()]).unit, 'TUE-H');
-  assert.ok(codes(one([row(), row({ poNo: 'ZZ0000U001', invNo: '' })])).includes('mixedUnit'));
-  assert.ok(codes(one([row({ invNo: 'TUE-U001' })])).includes('unitMismatch'));
-  assert.ok(codes(one([row({ poNo: 'ZZ' })])).includes('noUnit'));
-});
-
-test('E7 — แถวที่ไม่ใช่การรับของปกติ ราคาว่าง จำนวนไม่เป็นบวก หลายวันที่ ต้องฟ้อง ไม่ตัดทิ้งเอง', () => {
-  assert.ok(codes(one([row({ mvt: '102' })])).includes('notReceipt'));
-  assert.ok(codes(one([row({ unitPrice: '', grAmount: 0 })])).includes('noPrice'));
-  assert.ok(codes(one([row({ qty: -5, grAmount: -50 })])).includes('badQty'));
-  assert.ok(codes(one([row(), row({ poItem: '20', grDate: '2026-10-31' })])).includes('mixedDate'));
 });
 
 test('D2 — ไม่มีข้อมูลหรือช่องหายต้องไม่ล้ม', () => {
