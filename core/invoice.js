@@ -12,11 +12,20 @@
  *          `invNo` กรอกแค่แถวแรกของใบได้ แถวถัดไปของ GR เดียวกันเว้นว่าง
  *
  * ⚠️ **หนึ่งใบ = หนึ่ง GR No** ไม่ใช่หนึ่ง PO — ใบเดียวมีได้หลาย PO
- *    ห้ามเดาเติม ห้ามแก้ยอดให้เงียบ ๆ เอกสารนี้ออกไปถึงลูกค้า (INVARIANTS E3–E6)
+ *    ห้ามเดาเติม ห้ามแก้ยอดให้เงียบ ๆ เอกสารนี้ออกไปถึงลูกค้า (INVARIANTS E3–E7)
  */
+
+/** แถวต่อใบที่ฟอร์ม invoice รับได้ (แถว 16–28 ของชีต) */
+export const MAX_LINES = 13;
 
 /** อัตรา VAT — ไม่มีช่องให้แก้ในฟอร์ม */
 export const VAT_RATE = 0.07;
+
+/** ยอดของลูกค้าต่างจาก จำนวน × ราคา ได้เท่านี้โดยไม่ต้องฟ้อง */
+export const AMOUNT_TOLERANCE = 0.01;
+
+/** การเคลื่อนไหวที่เป็นการรับของปกติ */
+const MVT_RECEIPT = '101';
 
 const txt = v => String(v == null ? '' : v).trim();
 /** ตัวเลขจากไฟล์ — '1,000.00' ต้องอ่านออก · อ่านไม่ออกได้ NaN ให้ผู้เรียกฟ้อง ห้ามกลายเป็น 0 เงียบ ๆ */
@@ -39,6 +48,12 @@ export function round2(n) {
 export function unitFromPo(poNo) {
   const c = txt(poNo).toUpperCase().charAt(6);
   return 'HUTA'.includes(c) && c ? 'TUE-' + c : '';
+}
+
+/** หน่วยจากเลข invoice เช่น TUE-A0001 → TUE-A */
+export function unitFromInvNo(invNo) {
+  const m = /^(TUE-[A-Z])/i.exec(txt(invNo));
+  return m ? m[1].toUpperCase() : '';
 }
 
 /** ยอดของบรรทัด — ยอดของลูกค้าคือต้นทาง คิดเองเฉพาะเมื่อไฟล์ไม่มีให้ */
@@ -133,9 +148,27 @@ function finishInvoice(raw) {
   if (!invNo) add('noInvNo', 'ยังไม่มีเลข invoice จากลูกค้า');
   if (invNos.length > 1) add('invConflict', 'GR เดียวมีหลายเลข — ' + invNos.join(' · '));
 
-  // หน่วยดูจากรหัส PO เท่านั้น
+  // หน่วยดูจากรหัส PO เท่านั้น ใบเดียวต้องเป็นหน่วยเดียว ไม่งั้นราคาอาจผิดหน่วย
   const units = [...new Set(lines.map(l => unitFromPo(l.poNo)))];
   const unit = units.length === 1 ? units[0] : '';
+  if (units.length > 1) add('mixedUnit', 'ใบเดียวมีหลายหน่วย — ' + units.map(u => u || 'ไม่ทราบ').join(' · '));
+  else if (!unit) add('noUnit', 'บอกหน่วยจากรหัส PO ไม่ได้');
+  const noUnit = unitFromInvNo(invNo);
+  if (unit && noUnit && unit !== noUnit) add('unitMismatch', 'เลข ' + invNo + ' ไม่ตรงกับหน่วย ' + unit + ' ของ PO');
 
-  return { grNo, invNo, invNos, unit, grDate: (lines.find(l => l.grDate) || { grDate: '' }).grDate, lines, problems, ...totalsOf(lines) };
+  if (lines.length > MAX_LINES) add('tooManyLines', 'มี ' + lines.length + ' บรรทัด เกินฟอร์มที่รับได้ ' + MAX_LINES);
+
+  for (const l of lines) {
+    const at = l.poNo + ' รายการ ' + l.poItem;
+    // ต่าง 1 สตางค์เป็นเรื่องปกติ ราคาจริงของลูกค้ามีทศนิยมมากกว่าที่แสดง
+    if (Math.abs(l.amountDiff) > AMOUNT_TOLERANCE) add('amountDiff', at + ' จำนวน × ราคา ต่างจากยอดของลูกค้า ' + l.amountDiff.toFixed(2) + ' บาท');
+    if (l.mvt && l.mvt !== MVT_RECEIPT) add('notReceipt', at + ' รหัสการเคลื่อนไหว ' + l.mvt + ' ไม่ใช่การรับของปกติ');
+    if (l.qty <= 0) add('badQty', at + ' จำนวนไม่เป็นบวก');
+    if (!l.unitPrice) add('noPrice', at + ' ไม่มีราคาต่อหน่วย');
+  }
+
+  const dates = [...new Set(lines.map(l => l.grDate).filter(Boolean))];
+  if (dates.length > 1) add('mixedDate', 'GR เดียวมีหลายวันที่ — ' + dates.join(' · '));
+
+  return { grNo, invNo, invNos, unit, grDate: dates[0] || '', lines, problems, ...totalsOf(lines) };
 }
