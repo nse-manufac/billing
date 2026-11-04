@@ -214,3 +214,98 @@ test('B9 — P/N ที่ซ้ำกันระหว่างสองฝั
   const b = buildBills([pack({ pn: 'PN1' })], [ship({ qty: 5 })], [order({ pn: 'PN1' })]);
   assert.deepEqual(b[0].pns, ['PN1']);
 });
+
+/** แถวการกดออกใบ (DeliveryLog) — qty คือยอดตัดราย PO รวมของใบ */
+const issue = (o = {}) => Object.assign({
+  id: uid('l'), no: 'TUEH-261001', date: '2026-10-01', unit: 'TUE-H', week: '', groups: 1,
+  lines: 1, qty: 23, deviceName: 'เครื่องทดสอบ', createdAt: '2026-10-01T08:00:00.000Z',
+  voided: false
+}, o);
+
+test('B8 — ออกใบแล้วหรือยัง ดูจาก DeliveryLog ไม่ใช่จาก billNo หรือยอดบรรจุ', () => {
+  const [noLog] = buildBills([pack({ billNo: 'B-1' })], [ship()], [order()], []);
+  assert.equal(noLog.dispatched, false, 'มี billNo ไม่ได้แปลว่ากดออกใบ');
+  assert.equal(noLog.issued, true);
+  assert.equal(noLog.noteNo, '');
+
+  const [logged] = buildBills([pack()], [ship()], [order()], [issue()]);
+  assert.equal(logged.dispatched, true);
+  assert.equal(logged.noteNo, 'TUEH-261001');
+  assert.equal(logged.billNo, '', 'เลขที่ใบส่งของห้ามไหลเข้าช่อง billNo');
+  assert.equal(logged.issued, false);
+});
+
+test('B8 — ออกซ้ำหน่วย+วันเดิมยังเป็นใบเดียว และเรียงครั้งล่าสุดขึ้นก่อน (B2)', () => {
+  const bills = buildBills([pack()], [ship()], [order()], [
+    issue({ createdAt: '2026-10-01T08:00:00.000Z', deviceName: 'เก่า' }),
+    issue({ createdAt: '2026-10-01T09:00:00.000Z', deviceName: 'ใหม่' })
+  ]);
+  assert.equal(bills.length, 1);
+  assert.equal(bills[0].logs.length, 2);
+  assert.equal(bills[0].logs[0].deviceName, 'ใหม่');
+});
+
+test('B8 — ใบที่ออกไปแล้วต้องขึ้น แม้ยอดของวันนั้นถูกยกเลิกทีหลัง', () => {
+  const [b] = buildBills([pack({ voided: 'TRUE' })], [], [], [issue()]);
+  assert.equal(b.dispatched, true);
+  assert.equal(b.hasPacking, false);
+});
+
+test('B8 — log ที่ยกเลิกแล้วไม่นับ · เทียบหน่วยแบบไม่สนตัวพิมพ์เหมือนใบ', () => {
+  const [gone] = buildBills([pack()], [ship()], [order()], [issue({ voided: 'TRUE' })]);
+  assert.equal(gone.dispatched, false);
+  const bills = buildBills([pack()], [ship()], [order()], [issue({ unit: ' tue-h ' })]);
+  assert.equal(bills.length, 1, 'หน่วยที่เขียนต่างกันต้องไม่แตกเป็นอีกใบ');
+});
+
+test('B9 — ยอดตัดเข้าใบสั่งเปลี่ยนหลังออกใบต้องขึ้น เทียบกับครั้งล่าสุดเท่านั้น', () => {
+  const stale = logs => buildBills([pack()], [ship({ qty: 23 })], [order()], logs)[0].stale;
+  assert.equal(stale([issue({ qty: 23 })]), false);
+  assert.equal(stale([issue({ qty: 20 })]), true);
+  assert.equal(stale([
+    issue({ qty: 20, createdAt: '2026-10-01T08:00:00.000Z' }),
+    issue({ qty: 23, createdAt: '2026-10-01T09:00:00.000Z' })
+  ]), false, 'ออกซ้ำด้วยยอดใหม่แล้ว ใบเก่าไม่ใช่ตัวตัดสิน');
+});
+
+test('B9 — เทียบกับยอดตัดเข้าใบสั่ง ไม่ใช่ยอดบรรจุ', () => {
+  const [b] = buildBills([pack({ perBox: 100, boxes: 1, remainder: 0 })],
+                         [ship({ qty: 23 })], [order()], [issue({ qty: 23 })]);
+  assert.equal(b.unallocated, 77);
+  assert.equal(b.stale, false, 'ตัดไม่ครบเป็นคนละเรื่องกับยอดเปลี่ยนหลังออกใบ');
+});
+
+test('B9 — qty ว่างไม่มีอะไรให้เทียบ ต้องไม่ขึ้นป้าย · ยอด 0 จริงยังเทียบได้', () => {
+  for (const qty of [null, undefined, ''])
+    assert.equal(buildBills([pack()], [ship()], [order()], [issue({ qty })])[0].stale, false);
+  assert.equal(buildBills([pack()], [ship()], [order()], [issue({ qty: 0 })])[0].stale, true);
+  assert.equal(buildBills([pack()], [ship({ qty: 23 })], [order()], [issue({ qty: '23' })])[0].stale,
+               false, 'สตริงจากชีตต้องเทียบได้');
+});
+
+test('C2 — ตัวกรองการออกใบไม่กรองอะไรเลยเมื่อไม่ได้ตั้งค่า · ค้นด้วยเลขที่ใบส่งของได้', () => {
+  const bills = buildBills(
+    [pack(), pack({ date: '2026-10-02' })],
+    [], [], [issue()]);
+  assert.equal(filterBills(bills, {}).length, 2);
+  assert.equal(filterBills(bills, { sent: 'all' }).length, 2);
+  assert.equal(filterBills(bills, { sent: 'yes' }).length, 1);
+  assert.equal(filterBills(bills, { sent: 'no' }).length, 1);
+  assert.equal(filterBills(bills, { q: 'tueh-2610' }).length, 1);
+});
+
+test('C3 — ยอดสรุปการออกใบนับจากรายการที่ส่งเข้ามาเท่านั้น', () => {
+  const bills = buildBills([pack(), pack({ date: '2026-10-02' })],
+                           [ship({ qty: 23 })], [order()], [issue({ qty: 20 })]);
+  const s = summarize(bills);
+  assert.deepEqual([s.dispatched, s.notDispatched, s.stale], [1, 1, 1]);
+  assert.equal(summarize(filterBills(bills, { sent: 'no' })).stale, 0);
+});
+
+test('D2 — แถว log ที่พังต้องไม่ทำให้ล้ม · ไม่ส่ง logs มาเลยก็ยังประกอบใบได้', () => {
+  assert.equal(buildBills([pack()], [], [])[0].dispatched, false);
+  const [b] = buildBills([], [], [], [null, { date: '2026-10-01', unit: 'TUE-H' }]);
+  assert.equal(b.dispatched, true);
+  assert.equal(b.noteNo, '');
+  assert.equal(b.stale, false);
+});
