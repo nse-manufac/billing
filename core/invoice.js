@@ -87,22 +87,22 @@ export function buildInvoices(rows) {
 
     if (!byGr.has(grNo)) byGr.set(grNo, { grNo, invNos: [], lines: [], problems: [] });
     const inv = byGr.get(grNo);
-    const no = txt(r.invNo).toUpperCase();
-    if (no && !inv.invNos.includes(no)) inv.invNos.push(no);
+    // เก็บเลขตามที่ลูกค้าเขียน เทียบแบบไม่สนตัวพิมพ์
+    const no = txt(r.invNo);
+    if (no && !inv.invNos.some(x => x.toUpperCase() === no.toUpperCase())) inv.invNos.push(no);
 
     // กุญแจของบรรทัดคือ GR + PO + PO Item · ซ้ำเป๊ะทุกช่อง = ไฟล์เดียวกันถูกลากเข้ามาสองรอบ
     // ⚠️ ต่างแม้ช่องเดียว (P/N · ราคา · วันที่) ห้ามตัด ไม่งั้นยอดหายครึ่งใบโดยไม่มีอะไรแดง
     const line = lineOf(r);
     const key = grNo + '|' + line.poNo + '|' + line.poItem;
-    const prior = seen.get(key);
-    if (prior) {
-      if (Object.keys(line).every(k => prior[k] === line[k])) { dropped++; continue; }
-      inv.problems.push({ code: 'lineConflict', text:
-        'บรรทัด ' + line.poNo + ' รายการ ' + line.poItem + ' มีสองยอดไม่เท่ากัน — ตรวจกับเว็บลูกค้า' });
-    }
+    // เทียบกับทุกแถวของกุญแจนี้ที่เคยเห็น ไม่ใช่แค่ตัวล่าสุด — ลากไฟล์ซ้ำได้ลำดับ A B A B
+    const prior = seen.get(key) || [];
+    if (prior.some(p => Object.keys(line).every(k => p[k] === line[k]))) { dropped++; continue; }
+    if (prior.length) inv.problems.push({ code: 'lineConflict', text:
+      'บรรทัด ' + line.poNo + ' รายการ ' + line.poItem + ' มีหลายแถวที่ไม่ตรงกัน — ตรวจกับเว็บลูกค้า' });
     if (line.badNumber) inv.problems.push({ code: 'badNumber', text:
       'บรรทัด ' + line.poNo + ' รายการ ' + line.poItem + ' มีจำนวน ราคา หรือยอดที่อ่านเป็นตัวเลขไม่ได้' });
-    seen.set(key, line);
+    seen.set(key, prior.concat(line));
     inv.lines.push(line);
   }
 
@@ -110,7 +110,7 @@ export function buildInvoices(rows) {
 
   // เลขเดียวกันห้ามอยู่สองใบ — ลูกค้าแจกเลขให้หนึ่ง GR ต่อหนึ่งเลข (INVARIANTS E1)
   const owners = new Map();
-  for (const inv of invoices) for (const no of inv.invNos) {
+  for (const inv of invoices) for (const no of inv.invNos.map(x => x.toUpperCase())) {
     if (!owners.has(no)) owners.set(no, []);
     owners.get(no).push(inv);
   }

@@ -121,6 +121,10 @@ test('E6 — กุญแจเดียวกันแต่ช่องอื�
     assert.equal(r.dropped, 0, JSON.stringify(b));
     assert.ok(codes(r.invoices[0]).includes('lineConflict'), JSON.stringify(b));
   }
+  const a = row({ poItem: '' }), b = row({ poItem: '', pn: 'PN2' });
+  const twice = buildInvoices([a, b, a, b]);
+  assert.equal(twice.dropped, 2, 'ไฟล์เดิมลากซ้ำ ต้องตัดได้แม้แถวซ้ำไม่ติดกัน');
+  assert.equal(twice.invoices[0].subtotal, 2000);
   const blank = buildInvoices([row({ poItem: '' }), row({ poItem: '', pn: 'PN2' })]).invoices[0];
   assert.equal(blank.subtotal, 2000, 'ยอดต้องไม่หายครึ่งใบ');
 });
@@ -133,6 +137,7 @@ test('E1 — เลขเดียวอยู่สองใบต้องฟ�
   assert.ok(codes(a[1]).includes('dupInvNo'));
   const b = buildInvoices([row({ grNo: 'GR1', invNo: 'TUE-H001' }), row({ grNo: 'GR2', invNo: 'tue-h001 ' })]).invoices;
   assert.ok(b.every(i => codes(i).includes('dupInvNo')));
+  assert.equal(b[1].invNo, 'tue-h001', 'แสดงเลขตามที่ลูกค้าเขียน');
 });
 
 test('D2 — ตัวเลขที่เป็นข้อความมีลูกน้ำต้องอ่านออก · อ่านไม่ออกต้องฟ้อง ห้ามเป็น 0 เงียบ ๆ', () => {
