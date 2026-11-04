@@ -63,10 +63,11 @@ export async function pullTable(cfg, table) {
   return Array.isArray(d.rows) ? d.rows : [];
 }
 
-/** ดึงสามตารางที่ต้องใช้ประกอบเป็นใบส่งของ
+/** ดึงสี่ตารางที่ต้องใช้ประกอบเป็นใบส่งของ
  *
- *  ⚠️ ต้องครบทั้งสาม — ยอดบรรจุอยู่ใน DeliveryNotes แต่ "ใบไหนได้เท่าไหร่"
- *     อยู่ใน Records(shipping) และหน่วยของใบสั่งอยู่ใน Orders เท่านั้น
+ *  ⚠️ ต้องครบทั้งสี่ — ยอดบรรจุอยู่ใน DeliveryNotes แต่ "ใบไหนได้เท่าไหร่"
+ *     อยู่ใน Records(shipping) · หน่วยของใบสั่งอยู่ใน Orders เท่านั้น
+ *     และ "กดออกใบไปแล้วหรือยัง" อยู่ใน DeliveryLog ที่เดียว
  *     ขาดตัวใดตัวหนึ่งแล้วหน้าจอจะโชว์ช่องว่างที่ดูเหมือนข้อมูลหาย
  *
  *  ยิงพร้อมกันไม่ได้ — Apps Script ล็อกทีละคำขอ ยิงซ้อนจะได้ "ระบบกำลังถูกใช้งาน"
@@ -75,5 +76,6 @@ export async function pullAll(cfg) {
   const notes   = await pullTable(cfg, 'DeliveryNotes');
   const records = await pullTable(cfg, 'Records');
   const orders  = await pullTable(cfg, 'Orders');
-  return { notes, records, orders };
+  const logs    = await pullTable(cfg, 'DeliveryLog');
+  return { notes, records, orders, logs };
 }
