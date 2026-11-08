@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="app-version" content="2026-10-10.5">
+<meta name="app-version" content="2026-11-02.3">
 <title>ทะเบียนใบส่งของ</title>
 <!-- กันคำขอ favicon ที่ไม่มีไฟล์ — 404 ลอย ๆ ใน console ทำให้คนเลิกเชื่อ console
      แล้วพอมี error ของจริงโผล่มาจะไม่มีใครสังเกต -->
@@ -117,17 +117,23 @@
     <div class="card" v-if="ready">
       <div class="row">
         <label class="f grow" style="min-width:180px">ค้นหา
-          <input v-model.trim="f.q" placeholder="เลขใบ · เลข PO · P/N · หมายเหตุ"></label>
+          <input v-model.trim="f.q" placeholder="เลขที่ใบ · Bill No · เลข PO · P/N · หมายเหตุ"></label>
         <label class="f" style="width:130px">หน่วย
           <select v-model="f.unit">
             <option value="">ทั้งหมด</option>
             <option v-for="u in units" :key="u" :value="u">{{ u }}</option>
           </select></label>
-        <label class="f" style="width:150px">สถานะเลขใบ
+        <label class="f" style="width:130px">การออกใบ
+          <select v-model="f.sent">
+            <option value="all">ทั้งหมด</option>
+            <option value="yes">ออกใบแล้ว</option>
+            <option value="no">ยังไม่ออกใบ</option>
+          </select></label>
+        <label class="f" style="width:130px">Bill No
           <select v-model="f.issued">
             <option value="all">ทั้งหมด</option>
-            <option value="yes">ออกเลขใบแล้ว</option>
-            <option value="no">ยังไม่ออกเลขใบ</option>
+            <option value="yes">มีแล้ว</option>
+            <option value="no">ยังไม่มี</option>
           </select></label>
         <label class="f" style="width:150px">ตั้งแต่วันที่<input v-model="f.from" type="date"></label>
         <label class="f" style="width:150px">ถึงวันที่<input v-model="f.to" type="date"></label>
@@ -139,13 +145,15 @@
     <div class="card" v-if="ready">
       <div class="stat">
         <div>ใบทั้งหมด<b>{{ nf(sum.bills) }}</b></div>
-        <div>ออกเลขใบแล้ว<b>{{ nf(sum.issued) }}</b></div>
-        <div>ยังไม่ออกเลขใบ<b>{{ nf(sum.pending) }}</b></div>
+        <div>ออกใบแล้ว<b>{{ nf(sum.dispatched) }}</b></div>
+        <div>ยังไม่ออกใบ<b>{{ nf(sum.notDispatched) }}</b></div>
+        <div>มี Bill No<b>{{ nf(sum.issued) }}</b></div>
         <div>P/N<b>{{ nf(sum.pns) }}</b></div>
         <div>ใบสั่ง<b>{{ nf(sum.pos) }}</b></div>
         <div>ยอดรวม<b>{{ nf(sum.qty) }}</b></div>
         <div v-if="sum.noPacking">ยังไม่คีย์ยอดบรรจุ<b class="warn">{{ nf(sum.noPacking) }}</b></div>
         <div v-if="sum.needAttention">ตัดไม่ครบ/เลขชน<b class="warn">{{ nf(sum.needAttention) }}</b></div>
+        <div v-if="sum.stale">ยอดเปลี่ยนหลังออกใบ<b class="warn">{{ nf(sum.stale) }}</b></div>
       </div>
 
       <p class="hint" v-if="!bills.length && !busy">ยังไม่มีใบส่งของในระบบ หรือยังโหลดไม่สำเร็จ</p>
@@ -154,7 +162,8 @@
       <div class="scroll" style="max-height:52vh" v-if="shown.length">
         <table>
           <thead><tr>
-            <th style="width:120px">เลขที่ใบ</th><th style="width:105px">วันที่</th>
+            <th style="width:150px">เลขที่ใบส่งของ</th><th style="width:120px">Bill No</th>
+            <th style="width:105px">วันที่</th>
             <th style="width:95px">หน่วย</th>
             <th style="width:70px" class="right">P/N</th>
             <th style="width:70px" class="right">ใบสั่ง</th>
@@ -166,8 +175,16 @@
             <tr v-for="b in shown" :key="b.key" :class="{ sel: b.key === picked }"
                 @click="picked = (picked === b.key ? '' : b.key)">
               <td class="mono">
+                <span v-if="b.dispatched">{{ b.noteNo || '—' }}</span>
+                <span v-else class="tag warn">ยังไม่ออกใบ</span>
+                <span v-if="b.logs.length > 1" class="tag"
+                      :title="'กดออกใบ ' + b.logs.length + ' ครั้ง'">×{{ b.logs.length }}</span>
+                <span v-if="b.stale" class="tag bad"
+                      title="ยอดตัดเข้าใบสั่งตอนนี้ไม่ตรงกับตอนกดออกใบครั้งล่าสุด">ยอดเปลี่ยน</span>
+              </td>
+              <td class="mono">
                 <span v-if="b.issued">{{ b.billNo }}</span>
-                <span v-else class="tag warn">ยังไม่ออกเลข</span>
+                <span v-else class="hint">—</span>
                 <span v-if="b.billConflict" class="tag bad" title="ใบเดียวกันมีเลขใบมากกว่าหนึ่ง">เลขชนกัน</span>
               </td>
               <td>{{ fmtDate(b.date) }}</td>
@@ -177,7 +194,7 @@
               <td class="right">{{ nf(b.boxes) }}</td>
               <td class="right mono">
                 <span v-if="b.hasPacking">{{ nf(b.qty) }}</span>
-                <span v-else class="tag warn" title="วันนี้มียอดส่ง แต่ยังไม่ได้คีย์ยอดบรรจุ จึงยังออกใบส่งของไม่ได้">ยังไม่คีย์</span>
+                <span v-else class="tag warn" title="ยังไม่มีแถวยอดบรรจุของวันนี้">ยังไม่คีย์</span>
               </td>
               <td class="right mono">
                 {{ nf(b.allocQty) }}
@@ -195,18 +212,23 @@
       <div class="row">
         <h2 style="margin:0">
           รายละเอียดใบ
-          <span class="mono" v-if="pickedBill.issued">{{ pickedBill.billNo }}</span>
-          <span class="tag warn" v-else>ยังไม่ออกเลขใบ</span>
+          <span class="mono" v-if="pickedBill.dispatched">{{ pickedBill.noteNo || '—' }}</span>
+          <span class="tag warn" v-else>ยังไม่ออกใบ</span>
         </h2>
         <div class="grow"></div>
         <span class="tag">{{ fmtDate(pickedBill.date) }}</span>
         <span class="tag">{{ pickedBill.unit || 'ไม่ระบุหน่วย' }}</span>
+        <span class="tag" v-if="pickedBill.issued">Bill No {{ pickedBill.billNo }}</span>
       </div>
 
       <p class="msg bad" style="margin:8px 0 0" v-if="pickedBill.billConflict">
         ใบนี้มีเลขใบมากกว่าหนึ่ง — {{ pickedBill.billNos.join(' · ') }}
         · น่าจะมีคนคีย์ชนกัน ต้องไปแก้ที่โปรแกรมแผนงานก่อนวางบิล</p>
-      <p class="msg warn" style="margin:8px 0 0" v-if="!pickedBill.hasPacking">
+      <p class="msg bad" style="margin:8px 0 0" v-if="pickedBill.stale">
+        ยอดตัดเข้าใบสั่งตอนนี้ {{ nf(pickedBill.allocQty) }} ไม่ตรงกับตอนกดออกใบครั้งล่าสุด
+        ({{ nf(pickedBill.logs[0].qty) }}) — กระดาษที่ออกไปแล้วอาจไม่ตรงกับข้อมูลปัจจุบัน
+        ตรวจกับแม่สอดก่อนวางบิล</p>
+      <p class="msg warn" style="margin:8px 0 0" v-if="!pickedBill.hasPacking && !pickedBill.dispatched">
         วันนี้มียอดส่งเข้าใบสั่งแล้ว แต่<b>ยังไม่ได้คีย์ยอดบรรจุ</b> จึงยังออกใบส่งของไม่ได้
         — ไปคีย์ที่แท็บ 🚚 ใบส่งสินค้า ในโปรแกรมแผนงานก่อน</p>
       <p class="msg warn" style="margin:8px 0 0" v-else-if="pickedBill.unallocated">
@@ -265,6 +287,29 @@
           </tbody>
         </table>
       </div>
+
+      <!-- ประวัติการกดออกใบ — กดซ้ำได้เลขเดิม จึงต้องดูจากเวลา ไม่ใช่จากเลข -->
+      <template v-if="pickedBill.dispatched">
+        <h2 style="margin:16px 0 8px">ประวัติการออกใบ ({{ pickedBill.logs.length }} ครั้ง)</h2>
+        <div class="scroll">
+          <table>
+            <thead><tr>
+              <th style="width:170px">เมื่อ</th><th style="width:150px">เลขที่ใบส่งของ</th>
+              <th>เครื่อง</th><th style="width:70px" class="right">แถว</th>
+              <th style="width:110px" class="right">ยอด</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="l in pickedBill.logs" :key="l.id" style="cursor:default">
+                <td>{{ fmtTime(l.createdAt) }}</td>
+                <td class="mono">{{ l.no || '—' }}</td>
+                <td>{{ l.deviceName || '—' }}</td>
+                <td class="right">{{ nf(l.lines) }}</td>
+                <td class="right mono">{{ l.qty == null ? '—' : nf(l.qty) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
 
       <p class="hint" style="margin:12px 0 0">
         ขั้นถัดไปที่ยังไม่ได้ทำ — ปุ่มออกไฟล์ Excel พร้อมช่องฝั่งกรุงเทพ
